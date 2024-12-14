@@ -11,6 +11,8 @@
 #include <fstream>
 #include <sstream>
 #include <filesystem> // C++17 erforderlich
+#include <algorithm>  // for std::sort
+#include <vector>
 namespace fs = std::filesystem;
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -175,16 +177,16 @@ void *clientCommunication(void *data)
         buffer[size] = '\0';
         std::string message(buffer);
 
-        if (message.rfind("SEND\n", 0) == 0)
+        if (message.rfind("SEND", 0) == 0)
         {
             // PARSE MESSAGE
             std::istringstream stream(message);
             std::string command, sender, receiver, subject, msgBody, line;
 
-            std::getline(stream, command); // "SEND"
-            std::getline(stream, sender);  // Sender
+            std::getline(stream, command);  // "SEND"
+            std::getline(stream, sender);   // Sender
             std::getline(stream, receiver); // Empfänger
-            std::getline(stream, subject); // Betreff
+            std::getline(stream, subject);  // Betreff
 
             while (std::getline(stream, line) && line != ".")
             {
@@ -231,17 +233,115 @@ void *clientCommunication(void *data)
             {
                 std::cerr << "Fehler beim Öffnen der Datei: " << mailFile << std::endl;
             }
-
         }
-        else
+if (message.find("LIST") == 0) // LIST-Befehl erkannt
+{
+    std::cout << "[DEBUG] LIST command detected." << std::endl;
+
+    // Fordere den Benutzer auf, den Benutzernamen einzugeben
+    std::string prompt = "Benutzernamen:\n";
+    if (send(*current_socket, prompt.c_str(), prompt.size(), 0) == -1)
+    {
+        perror("[DEBUG] send failed when prompting for username");
+        return NULL;
+    }
+
+    // Empfange den Benutzernamen
+    size = recv(*current_socket, buffer, BUF - 1, 0);
+    if (size == -1)
+    {
+        perror("[DEBUG] recv error when reading username");
+        return NULL;
+    }
+    if (size == 0)
+    {
+        std::cout << "[DEBUG] Client hat die Verbindung geschlossen." << std::endl;
+        return NULL;
+    }
+
+    buffer[size] = '\0';
+    std::string username(buffer);
+    username.erase(username.find_last_not_of("\r\n") + 1); // Entferne \r\n
+    std::cout << "[DEBUG] Username received: '" << username << "'" << std::endl;
+
+    // Pfad des Benutzerverzeichnisses
+    fs::path userFolder = "Received_Mails/" + username;
+    std::ostringstream response;   // Für die finale Antwort
+    std::vector<fs::path> files;   // Für die Dateisortierung
+    std::ostringstream subjects;  // Für die Betreffzeilen
+
+    if (!fs::exists(userFolder) || fs::is_empty(userFolder))
+    {
+        std::cout << "[DEBUG] User folder does not exist or is empty: " << userFolder << std::endl;
+        response << "Count of messages of user:  0\n";
+    }
+    else
+    {
+        std::cout << "[DEBUG] Processing mails for user: " << username << std::endl;
+        int messageCount = 0;
+
+        // Sammle alle Dateien im Verzeichnis
+        for (const auto &entry : fs::directory_iterator(userFolder))
         {
-            // SEND "OK" FOR OTHER COMMANDS
-            if (send(*current_socket, "OK", 3, 0) == -1)
+            if (entry.is_regular_file())
             {
-                perror("send answer failed");
-                return NULL;
+                files.push_back(entry.path());
             }
         }
+
+        // Sortiere die Dateien nach Namen (aufsteigend)
+        std::sort(files.begin(), files.end());
+
+        // Verarbeite die Dateien in sortierter Reihenfolge
+        for (const auto &file : files)
+        {
+            std::cout << "[DEBUG] Processing file: " << file << std::endl;
+            std::ifstream mailFile(file);
+            if (!mailFile.is_open())
+            {
+                std::cerr << "[DEBUG] Failed to open file: " << file << std::endl;
+                continue;
+            }
+
+            std::string line;
+            while (std::getline(mailFile, line))
+            {
+                if (line.rfind("Betreff: ", 0) == 0) // Finde "Betreff: "
+                {
+                    std::cout << "[DEBUG] Found subject: " << line.substr(9) << std::endl;
+                    subjects << line.substr(9) << "\n"; // Nur den Betreff speichern
+                    break;
+                }
+            }
+            mailFile.close();
+            ++messageCount;
+        }
+
+        // Nachrichtenzähler hinzufügen
+        response << "Count of messages of user:  " << messageCount << "\n";
+        response << subjects.str(); // Betreffzeilen hinzufügen
+    }
+
+    std::cout << "[DEBUG] Response to client: " << response.str() << std::endl;
+
+    if (send(*current_socket, response.str().c_str(), response.str().size(), 0) == -1)
+    {
+        perror("[DEBUG] send failed when sending response");
+        return NULL;
+    }
+}
+
+
+        /*
+                else
+                {
+                    // SEND "OK" FOR OTHER COMMANDS
+                    if (send(*current_socket, "ERR", 3, 0) == -1)
+                    {
+                        perror("send answer failed");
+                        return NULL;
+                    }
+                }*/
     } while (strcmp(buffer, "quit") != 0 && !abortRequested);
 
     // CLOSE CLIENT SOCKET
