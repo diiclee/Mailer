@@ -330,6 +330,105 @@ if (message.find("LIST") == 0) // LIST-Befehl erkannt
         return NULL;
     }
 }
+if (message.find("READ") == 0) // READ-Befehl erkannt
+{
+    std::cout << "[DEBUG] READ command detected." << std::endl;
+
+    // Fordere den Benutzer auf, den Benutzernamen einzugeben
+    std::string prompt = "Benutzernamen:\n";
+    if (send(*current_socket, prompt.c_str(), prompt.size(), 0) == -1)
+    {
+        perror("[DEBUG] send failed when prompting for username");
+        return NULL;
+    }
+
+    // Empfange den Benutzernamen
+    size = recv(*current_socket, buffer, BUF - 1, 0);
+    if (size == -1)
+    {
+        perror("[DEBUG] recv error when reading username");
+        return NULL;
+    }
+    if (size == 0)
+    {
+        std::cout << "[DEBUG] Client hat die Verbindung geschlossen." << std::endl;
+        return NULL;
+    }
+
+    buffer[size] = '\0';
+    std::string username(buffer);
+    username.erase(username.find_last_not_of("\r\n") + 1); // Entferne \r\n
+    std::cout << "[DEBUG] Username received: '" << username << "'" << std::endl;
+
+    // Fordere die Nummer der Nachricht an
+    prompt = "Nachrichtennummer:\n";
+    if (send(*current_socket, prompt.c_str(), prompt.size(), 0) == -1)
+    {
+        perror("[DEBUG] send failed when prompting for message number");
+        return NULL;
+    }
+
+    // Empfange die Nachrichtennummer
+    size = recv(*current_socket, buffer, BUF - 1, 0);
+    if (size == -1)
+    {
+        perror("[DEBUG] recv error when reading message number");
+        return NULL;
+    }
+    if (size == 0)
+    {
+        std::cout << "[DEBUG] Client hat die Verbindung geschlossen." << std::endl;
+        return NULL;
+    }
+
+    buffer[size] = '\0';
+    std::string messageNumber(buffer);
+    messageNumber.erase(messageNumber.find_last_not_of("\r\n") + 1); // Entferne \r\n
+    std::cout << "[DEBUG] Message number received: '" << messageNumber << "'" << std::endl;
+
+    // Pfad zur Datei basierend auf Benutzername und Nachrichtennummer
+    fs::path messageFile = "Received_Mails/" + username + "/" + messageNumber + "mail.txt";
+
+    if (!fs::exists(messageFile))
+    {
+        std::cout << "[DEBUG] Message file does not exist: " << messageFile << std::endl;
+        if (send(*current_socket, "ERR\n", 4, 0) == -1)
+        {
+            perror("[DEBUG] send failed when sending ERR");
+        }
+        return NULL;
+    }
+
+    // Lese die vollständige Nachricht aus der Datei
+    std::ifstream mailFile(messageFile);
+    if (!mailFile.is_open())
+    {
+        std::cerr << "[DEBUG] Failed to open file: " << messageFile << std::endl;
+        if (send(*current_socket, "ERR\n", 4, 0) == -1)
+        {
+            perror("[DEBUG] send failed when sending ERR");
+        }
+        return NULL;
+    }
+
+    std::ostringstream fullMessage;
+    std::string line;
+    while (std::getline(mailFile, line))
+    {
+        fullMessage << line << "\n";
+    }
+    mailFile.close();
+
+    // Sende die vollständige Nachricht mit "OK"
+    std::string response = "OK\n" + fullMessage.str();
+    if (send(*current_socket, response.c_str(), response.size(), 0) == -1)
+    {
+        perror("[DEBUG] send failed when sending full message");
+        return NULL;
+    }
+
+    std::cout << "[DEBUG] Message sent successfully: " << messageFile << std::endl;
+}
 
 
         /*
