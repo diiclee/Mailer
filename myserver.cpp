@@ -242,7 +242,7 @@ void *clientCommunication(void *data)
 
             if (!fs::exists(userFolder) || fs::is_empty(userFolder))
             {
-                response << "Count of messages of user: 0\n";
+                response << "Count of messages of user: 0 or user unknown\n";
             }
             else
             {
