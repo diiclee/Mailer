@@ -430,51 +430,26 @@ if (message.find("READ") == 0) // READ-Befehl erkannt
     std::cout << "[DEBUG] Message sent successfully: " << messageFile << std::endl;
 }
 
-if (message.find("DEL") == 0) // DEL-Befehl erkannt
+if (message.rfind("DEL", 0) == 0) // DEL-Befehl erkannt
 {
     std::cout << "[DEBUG] DEL command detected." << std::endl;
 
-    // Benutzernamen abfragen
-    std::string prompt = "Benutzernamen:\n";
-    if (send(*current_socket, prompt.c_str(), prompt.size(), 0) == -1)
-    {
-        perror("[DEBUG] send failed when prompting for username");
-        return NULL;
-    }
+    // Die empfangene Nachricht im Format "DEL\n<Username>\n<Message-Number>\n" parsen
+    std::istringstream stream(message);
+    std::string command, username, messageNumber;
 
-    // Benutzername empfangen
-    size = recv(*current_socket, buffer, BUF - 1, 0);
-    if (size <= 0)
-    {
-        perror("[DEBUG] recv error when reading username");
-        return NULL;
-    }
-    buffer[size] = '\0';
-    std::string username(buffer);
+    std::getline(stream, command);        // DEL
+    std::getline(stream, username);       // Benutzername
+    std::getline(stream, messageNumber);  // Nachrichtennummer
+
+    // Leerzeichen oder Zeilenumbrüche entfernen
     username.erase(username.find_last_not_of("\r\n") + 1);
-
-    // Nachrichtennummer abfragen
-    prompt = "Nachrichtennummer:\n";
-    if (send(*current_socket, prompt.c_str(), prompt.size(), 0) == -1)
-    {
-        perror("[DEBUG] send failed when prompting for message number");
-        return NULL;
-    }
-
-    // Nachrichtennummer empfangen
-    size = recv(*current_socket, buffer, BUF - 1, 0);
-    if (size <= 0)
-    {
-        perror("[DEBUG] recv error when reading message number");
-        return NULL;
-    }
-    buffer[size] = '\0';
-    std::string messageNumber(buffer);
     messageNumber.erase(messageNumber.find_last_not_of("\r\n") + 1);
+
+    std::cout << "[DEBUG] Username: '" << username << "', Message Number: '" << messageNumber << "'" << std::endl;
 
     // Pfad zur Nachrichtendatei
     fs::path messageFile = "Received_Mails/" + username + "/" + messageNumber + "mail.txt";
-    std::cout << "[DEBUG] Trying to delete: " << messageFile << std::endl;
 
     if (fs::exists(messageFile))
     {
@@ -482,6 +457,7 @@ if (message.find("DEL") == 0) // DEL-Befehl erkannt
         fs::remove(messageFile);
         std::cout << "[DEBUG] Deleted: " << messageFile << std::endl;
 
+        // Erfolg zurücksenden
         if (send(*current_socket, "OK\n", 3, 0) == -1)
         {
             perror("[DEBUG] send failed when sending OK");
@@ -489,22 +465,13 @@ if (message.find("DEL") == 0) // DEL-Befehl erkannt
     }
     else
     {
+        // Fehler zurücksenden
         std::cout << "[DEBUG] Message file does not exist: " << messageFile << std::endl;
-
         if (send(*current_socket, "ERR\n", 4, 0) == -1)
         {
             perror("[DEBUG] send failed when sending ERR");
         }
     }
-
-    // **WICHTIG: Verbleibende Daten im Socket ignorieren**
-    while (recv(*current_socket, buffer, BUF - 1, MSG_DONTWAIT) > 0)
-    {
-        // Ignoriere verbleibende Daten
-    }
-
-    // Rückkehr aus dem DEL-Befehl
-    continue;
 }
 
         /*
