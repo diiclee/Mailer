@@ -11,6 +11,23 @@
 
 ///////////////////////////////////////////////////////////////////////////////
 
+// Function to validate the username
+bool checkUsernameLength(const std::string &username) {
+    if(username.length() > 8)
+        return false;
+    for (char c : username) {
+        if (!isalnum(c)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Function to validate the subject
+bool checkSubjectLength(const std::string &subject) {
+    return subject.length() <= 80;
+}
+
 void send_mails(int create_socket, const std::string &sender, const std::string &receiver, const std::string &subject, const std::string &message)
 {
     std::string buffer;
@@ -217,14 +234,29 @@ int main(int argc, char **argv)
                 // collect inputs for the SEND command
                 std::string sender, receiver, subject, message, line;
 
-                std::cout << "Sender: ";
-                std::getline(std::cin, sender);
+                while(true){
+                    std::cout << "Sender: ";
+                    std::getline(std::cin, sender);
+                    if(checkUsernameLength(sender))
+                        break;
+                    std::cout << "Username too long! Must be less than 8 characters!" << std::endl;
+                }
 
-                std::cout << "Receiver: ";
-                std::getline(std::cin, receiver);
+                while(true){
+                    std::cout << "Receiver: ";
+                    std::getline(std::cin, receiver);
+                    if(checkUsernameLength(receiver))
+                        break;
+                    std::cout << "Username too long! Must be less than 8 characters!" << std::endl;
+                }
 
-                std::cout << "Subject: ";
-                std::getline(std::cin, subject);
+                while(true){
+                    std::cout << "Subject: ";
+                    std::getline(std::cin, subject);
+                    if(checkSubjectLength(subject))
+                        break;
+                    std::cout << "Subject too long. Subject must be less than 80 characters long." << std::endl;
+                }
 
                 std::cout << "Message (multi-line, end with '.'): \n";
                 while (std::getline(std::cin, line) && line != ".")
