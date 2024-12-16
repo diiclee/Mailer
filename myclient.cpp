@@ -109,7 +109,64 @@ int main(int argc, char **argv) {
 
                 // SEND-Nachricht senden
                 send_message(create_socket, sender, receiver, subject, message);
-            } else {
+            } 
+            else if (command == "DEL") {
+    std::string username, messageNumber;
+
+    // Benutzername eingeben
+    std::cout << "Benutzername: ";
+    std::getline(std::cin, username);
+
+    // Nachrichtennummer eingeben
+    std::cout << "Nachrichtennummer: ";
+    std::getline(std::cin, messageNumber);
+
+    // DEL-Befehl senden
+    std::string buffer = "DEL\n";
+    if (send(create_socket, buffer.c_str(), buffer.size(), 0) == -1) {
+        perror("Fehler beim Senden des DEL-Befehls");
+        return EXIT_FAILURE; // FIX: gültiger Rückgabewert
+    }
+    usleep(100000);
+
+    // Benutzernamen senden
+    username += "\n"; 
+    if (send(create_socket, username.c_str(), username.size(), 0) == -1) {
+        perror("Fehler beim Senden des Benutzernamens");
+        return EXIT_FAILURE; // FIX
+    }
+    usleep(100000);
+
+    // Serverantwort empfangen
+    char recv_buffer[BUF];
+    int size = recv(create_socket, recv_buffer, BUF - 1, 0);
+    if (size <= 0) {
+        perror("Fehler beim Empfangen des Nachrichtennummer-Prompts");
+        return EXIT_FAILURE; // FIX
+    }
+    recv_buffer[size] = '\0';
+    std::cout << recv_buffer;
+
+    // Nachrichtennummer senden
+    messageNumber += "\n";
+    if (send(create_socket, messageNumber.c_str(), messageNumber.size(), 0) == -1) {
+        perror("Fehler beim Senden der Nachrichtennummer");
+        return EXIT_FAILURE; // FIX
+    }
+    usleep(100000);
+
+    // Serverantwort empfangen
+    size = recv(create_socket, recv_buffer, BUF - 1, 0);
+    if (size > 0) {
+        recv_buffer[size] = '\0';
+        std::cout << "<< " << recv_buffer << std::endl;
+    } else {
+        perror("Fehler beim Empfangen der Serverantwort");
+        return EXIT_FAILURE; // FIX
+    }
+}
+
+else {
                 // Andere Befehle senden
                 if (send(create_socket, command.c_str(), command.size() + 1, 0) == -1) {
                     perror("send error");
