@@ -36,6 +36,72 @@ void send_message(int create_socket, const std::string& sender, const std::strin
     }
 }
 
+void list_messages(int create_socket, const std::string& username) {
+    std::string buffer = "LIST\n" + username + "\n";
+
+    // LIST-Nachricht senden
+    if (send(create_socket, buffer.c_str(), buffer.size(), 0) == -1) {
+        perror("Fehler beim Senden der LIST-Anfrage");
+        return;
+    }
+
+    // Serverantwort lesen
+    char recv_buffer[BUF];
+    int size = recv(create_socket, recv_buffer, BUF - 1, 0);
+    if (size == -1) {
+        perror("Fehler beim Empfangen der Serverantwort");
+    } else if (size == 0) {
+        std::cout << "Server hat die Verbindung geschlossen." << std::endl;
+    } else {
+        recv_buffer[size] = '\0';
+        std::cout << "<< " << recv_buffer << std::endl;
+    }
+}
+
+void read_message(int create_socket, const std::string& username, const std::string& message_number) {
+    std::string buffer = "READ\n" + username + "\n" + message_number + "\n";
+
+    // READ-Nachricht senden
+    if (send(create_socket, buffer.c_str(), buffer.size(), 0) == -1) {
+        perror("Fehler beim Senden der READ-Anfrage");
+        return;
+    }
+
+    // Serverantwort lesen
+    char recv_buffer[BUF];
+    int size = recv(create_socket, recv_buffer, BUF - 1, 0);
+    if (size == -1) {
+        perror("Fehler beim Empfangen der Serverantwort");
+    } else if (size == 0) {
+        std::cout << "Server hat die Verbindung geschlossen." << std::endl;
+    } else {
+        recv_buffer[size] = '\0';
+        std::cout << "<< " << recv_buffer << std::endl;
+    }
+}
+
+void delete_message(int create_socket, const std::string& username, const std::string& message_number) {
+    std::string buffer = "DEL\n" + username + "\n" + message_number + "\n";
+
+    // DEL-Nachricht senden
+    if (send(create_socket, buffer.c_str(), buffer.size(), 0) == -1) {
+        perror("Fehler beim Senden der DEL-Anfrage");
+        return;
+    }
+
+    // Serverantwort lesen
+    char recv_buffer[BUF];
+    int size = recv(create_socket, recv_buffer, BUF - 1, 0);
+    if (size == -1) {
+        perror("Fehler beim Empfangen der Serverantwort");
+    } else if (size == 0) {
+        std::cout << "Server hat die Verbindung geschlossen." << std::endl;
+    } else {
+        recv_buffer[size] = '\0';
+        std::cout << "<< " << recv_buffer << std::endl;
+    }
+}
+
 int main(int argc, char **argv) {
     int create_socket;
     char buffer[BUF];
@@ -109,59 +175,34 @@ int main(int argc, char **argv) {
 
                 // SEND-Nachricht senden
                 send_message(create_socket, sender, receiver, subject, message);
-            } 
-  else if (command == "DEL") {
-    std::string username, messageNumber;
+            } else if (command == "LIST") {
+                // LIST-Befehl verarbeiten
+                std::string username;
+                std::cout << "Benutzername: ";
+                std::getline(std::cin, username);
 
-    // Benutzername eingeben
-    std::cout << "Benutzername: ";
-    std::getline(std::cin, username);
+                list_messages(create_socket, username);
+            } else if (command == "READ") {
+                // READ-Befehl verarbeiten
+                std::string username, message_number;
+                std::cout << "Benutzername: ";
+                std::getline(std::cin, username);
+                std::cout << "Nachrichtennummer: ";
+                std::getline(std::cin, message_number);
 
-    // Nachrichtennummer eingeben
-    std::cout << "Nachrichtennummer: ";
-    std::getline(std::cin, messageNumber);
+                read_message(create_socket, username, message_number);
+            } else if (command == "DEL") {
+                // DEL-Befehl verarbeiten
+                std::string username, message_number;
+                std::cout << "Benutzername: ";
+                std::getline(std::cin, username);
+                std::cout << "Nachrichtennummer: ";
+                std::getline(std::cin, message_number);
 
-    // Komplette Nachricht erstellen
-    std::string buffer = "DEL\n" + username + "\n" + messageNumber + "\n";
-
-    // DEL-Befehl senden
-    if (send(create_socket, buffer.c_str(), buffer.size(), 0) == -1) {
-        perror("Fehler beim Senden des DEL-Befehls");
-        return EXIT_FAILURE;
-    }
-
-    // Serverantwort empfangen
-    char recv_buffer[BUF];
-    int size = recv(create_socket, recv_buffer, BUF - 1, 0);
-    if (size > 0) {
-        recv_buffer[size] = '\0';
-        std::cout << "<< " << recv_buffer << std::endl;
-    } else if (size == 0) {
-        std::cout << "Server closed remote socket." << std::endl;
-    } else {
-        perror("Fehler beim Empfangen der Serverantwort");
-    }
-}
-
-else {
+                delete_message(create_socket, username, message_number);
+            } else {
                 // Andere Befehle senden
-                if (send(create_socket, command.c_str(), command.size() + 1, 0) == -1) {
-                    perror("send error");
-                    break;
-                }
-
-                // Feedback vom Server
-                size = recv(create_socket, buffer, BUF - 1, 0);
-                if (size == -1) {
-                    perror("recv error");
-                    break;
-                } else if (size == 0) {
-                    std::cout << "Server closed remote socket" << std::endl;
-                    break;
-                } else {
-                    buffer[size] = '\0';
-                    std::cout << "<< " << buffer << std::endl;
-                }
+                std::cerr << "Unbekannter Befehl: " << command << std::endl;
             }
         }
     } while (!isQuit);

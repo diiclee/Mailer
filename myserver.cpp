@@ -179,7 +179,6 @@ void *clientCommunication(void *data)
 
         if (message.rfind("SEND", 0) == 0)
         {
-            // PARSE MESSAGE
             std::istringstream stream(message);
             std::string command, sender, receiver, subject, msgBody, line;
 
@@ -213,16 +212,6 @@ void *clientCommunication(void *data)
                 outFile << msgBody;
                 outFile.close();
 
-                // SEND RESPONSE
-                /*
-                std::string response = "Mail gespeichert für " + receiver + ".\r\n";
-                if (send(*current_socket, response.c_str(), response.size(), 0) == -1)
-                {
-                    perror("send answer failed");
-                    return NULL;
-                }*/
-
-                // Sende "OK" bei erfolgreichem Speichern
                 if (send(*current_socket, "OK\r\n", 4, 0) == -1)
                 {
                     perror("send answer failed");
@@ -234,256 +223,147 @@ void *clientCommunication(void *data)
                 std::cerr << "Fehler beim Öffnen der Datei: " << mailFile << std::endl;
             }
         }
-if (message.find("LIST") == 0) // LIST-Befehl erkannt
-{
-    std::cout << "[DEBUG] LIST command detected." << std::endl;
-
-    // Fordere den Benutzer auf, den Benutzernamen einzugeben
-    std::string prompt = "Benutzernamen:\n";
-    if (send(*current_socket, prompt.c_str(), prompt.size(), 0) == -1)
-    {
-        perror("[DEBUG] send failed when prompting for username");
-        return NULL;
-    }
-
-    // Empfange den Benutzernamen
-    size = recv(*current_socket, buffer, BUF - 1, 0);
-    if (size == -1)
-    {
-        perror("[DEBUG] recv error when reading username");
-        return NULL;
-    }
-    if (size == 0)
-    {
-        std::cout << "[DEBUG] Client hat die Verbindung geschlossen." << std::endl;
-        return NULL;
-    }
-
-    buffer[size] = '\0';
-    std::string username(buffer);
-    username.erase(username.find_last_not_of("\r\n") + 1); // Entferne \r\n
-    std::cout << "[DEBUG] Username received: '" << username << "'" << std::endl;
-
-    // Pfad des Benutzerverzeichnisses
-    fs::path userFolder = "Received_Mails/" + username;
-    std::ostringstream response;   // Für die finale Antwort
-    std::vector<fs::path> files;   // Für die Dateisortierung
-    std::ostringstream subjects;  // Für die Betreffzeilen
-
-    if (!fs::exists(userFolder) || fs::is_empty(userFolder))
-    {
-        std::cout << "[DEBUG] User folder does not exist or is empty: " << userFolder << std::endl;
-        response << "Count of messages of user:  0\n";
-    }
-    else
-    {
-        std::cout << "[DEBUG] Processing mails for user: " << username << std::endl;
-        int messageCount = 0;
-
-        // Sammle alle Dateien im Verzeichnis
-        for (const auto &entry : fs::directory_iterator(userFolder))
+        else if (message.rfind("LIST", 0) == 0)
         {
-            if (entry.is_regular_file())
+            std::istringstream stream(message);
+            std::string command, username;
+            std::getline(stream, command);  // "LIST"
+            std::getline(stream, username); // Username
+
+            fs::path userFolder = "Received_Mails/" + username;
+            std::ostringstream response;
+            std::vector<fs::path> files;
+            std::ostringstream subjects;
+
+            if (!fs::exists(userFolder) || fs::is_empty(userFolder))
             {
-                files.push_back(entry.path());
+                response << "Count of messages of user:  0\n";
+            }
+            else
+            {
+                int messageCount = 0;
+
+                for (const auto &entry : fs::directory_iterator(userFolder))
+                {
+                    if (entry.is_regular_file())
+                    {
+                        files.push_back(entry.path());
+                    }
+                }
+
+                std::sort(files.begin(), files.end());
+
+                for (const auto &file : files)
+                {
+                    std::ifstream mailFile(file);
+                    if (!mailFile.is_open())
+                    {
+                        std::cerr << "Fehler beim Öffnen der Datei: " << file << std::endl;
+                        continue;
+                    }
+
+                    std::string line;
+                    while (std::getline(mailFile, line))
+                    {
+                        if (line.rfind("Betreff: ", 0) == 0)
+                        {
+                            subjects << line.substr(9) << "\n";
+                            break;
+                        }
+                    }
+                    mailFile.close();
+                    ++messageCount;
+                }
+
+                response << "Count of messages of user:  " << messageCount << "\n";
+                response << subjects.str();
+            }
+
+            if (send(*current_socket, response.str().c_str(), response.str().size(), 0) == -1)
+            {
+                perror("send failed when sending LIST response");
+                return NULL;
             }
         }
-
-        // Sortiere die Dateien nach Namen (aufsteigend)
-        std::sort(files.begin(), files.end());
-
-        // Verarbeite die Dateien in sortierter Reihenfolge
-        for (const auto &file : files)
+        else if (message.rfind("READ", 0) == 0)
         {
-            std::cout << "[DEBUG] Processing file: " << file << std::endl;
-            std::ifstream mailFile(file);
-            if (!mailFile.is_open())
+            std::istringstream stream(message);
+            std::string command, username, messageNumber;
+            std::getline(stream, command);        // READ
+            std::getline(stream, username);       // Benutzername
+            std::getline(stream, messageNumber);  // Nachrichtennummer
+
+            fs::path messageFile = "Received_Mails/" + username + "/" + messageNumber + "mail.txt";
+
+            if (!fs::exists(messageFile))
             {
-                std::cerr << "[DEBUG] Failed to open file: " << file << std::endl;
-                continue;
+                if (send(*current_socket, "ERR\n", 4, 0) == -1)
+                {
+                    perror("send failed when sending ERR");
+                }
+                return NULL;
             }
 
+            std::ifstream mailFile(messageFile);
+            if (!mailFile.is_open())
+            {
+                if (send(*current_socket, "ERR\n", 4, 0) == -1)
+                {
+                    perror("send failed when sending ERR");
+                }
+                return NULL;
+            }
+
+            std::ostringstream fullMessage;
             std::string line;
             while (std::getline(mailFile, line))
             {
-                if (line.rfind("Betreff: ", 0) == 0) // Finde "Betreff: "
-                {
-                    std::cout << "[DEBUG] Found subject: " << line.substr(9) << std::endl;
-                    subjects << line.substr(9) << "\n"; // Nur den Betreff speichern
-                    break;
-                }
+                fullMessage << line << "\n";
             }
             mailFile.close();
-            ++messageCount;
+
+            std::string response = "OK\n" + fullMessage.str();
+            if (send(*current_socket, response.c_str(), response.size(), 0) == -1)
+            {
+                perror("send failed when sending READ message");
+                return NULL;
+            }
         }
-
-        // Nachrichtenzähler hinzufügen
-        response << "Count of messages of user:  " << messageCount << "\n";
-        response << subjects.str(); // Betreffzeilen hinzufügen
-    }
-
-    std::cout << "[DEBUG] Response to client: " << response.str() << std::endl;
-
-    if (send(*current_socket, response.str().c_str(), response.str().size(), 0) == -1)
-    {
-        perror("[DEBUG] send failed when sending response");
-        return NULL;
-    }
-}
-if (message.find("READ") == 0) // READ-Befehl erkannt
-{
-    std::cout << "[DEBUG] READ command detected." << std::endl;
-
-    // Fordere den Benutzer auf, den Benutzernamen einzugeben
-    std::string prompt = "Benutzernamen:\n";
-    if (send(*current_socket, prompt.c_str(), prompt.size(), 0) == -1)
-    {
-        perror("[DEBUG] send failed when prompting for username");
-        return NULL;
-    }
-
-    // Empfange den Benutzernamen
-    size = recv(*current_socket, buffer, BUF - 1, 0);
-    if (size == -1)
-    {
-        perror("[DEBUG] recv error when reading username");
-        return NULL;
-    }
-    if (size == 0)
-    {
-        std::cout << "[DEBUG] Client hat die Verbindung geschlossen." << std::endl;
-        return NULL;
-    }
-
-    buffer[size] = '\0';
-    std::string username(buffer);
-    username.erase(username.find_last_not_of("\r\n") + 1); // Entferne \r\n
-    std::cout << "[DEBUG] Username received: '" << username << "'" << std::endl;
-
-    // Fordere die Nummer der Nachricht an
-    prompt = "Nachrichtennummer:\n";
-    if (send(*current_socket, prompt.c_str(), prompt.size(), 0) == -1)
-    {
-        perror("[DEBUG] send failed when prompting for message number");
-        return NULL;
-    }
-
-    // Empfange die Nachrichtennummer
-    size = recv(*current_socket, buffer, BUF - 1, 0);
-    if (size == -1)
-    {
-        perror("[DEBUG] recv error when reading message number");
-        return NULL;
-    }
-    if (size == 0)
-    {
-        std::cout << "[DEBUG] Client hat die Verbindung geschlossen." << std::endl;
-        return NULL;
-    }
-
-    buffer[size] = '\0';
-    std::string messageNumber(buffer);
-    messageNumber.erase(messageNumber.find_last_not_of("\r\n") + 1); // Entferne \r\n
-    std::cout << "[DEBUG] Message number received: '" << messageNumber << "'" << std::endl;
-
-    // Pfad zur Datei basierend auf Benutzername und Nachrichtennummer
-    fs::path messageFile = "Received_Mails/" + username + "/" + messageNumber + "mail.txt";
-
-    if (!fs::exists(messageFile))
-    {
-        std::cout << "[DEBUG] Message file does not exist: " << messageFile << std::endl;
-        if (send(*current_socket, "ERR\n", 4, 0) == -1)
+        else if (message.rfind("DEL", 0) == 0)
         {
-            perror("[DEBUG] send failed when sending ERR");
-        }
-        return NULL;
-    }
+            std::istringstream stream(message);
+            std::string command, username, messageNumber;
+            std::getline(stream, command);        // DEL
+            std::getline(stream, username);       // Benutzername
+            std::getline(stream, messageNumber);  // Nachrichtennummer
 
-    // Lese die vollständige Nachricht aus der Datei
-    std::ifstream mailFile(messageFile);
-    if (!mailFile.is_open())
-    {
-        std::cerr << "[DEBUG] Failed to open file: " << messageFile << std::endl;
-        if (send(*current_socket, "ERR\n", 4, 0) == -1)
-        {
-            perror("[DEBUG] send failed when sending ERR");
-        }
-        return NULL;
-    }
+            fs::path messageFile = "Received_Mails/" + username + "/" + messageNumber + "mail.txt";
 
-    std::ostringstream fullMessage;
-    std::string line;
-    while (std::getline(mailFile, line))
-    {
-        fullMessage << line << "\n";
-    }
-    mailFile.close();
+            if (fs::exists(messageFile))
+            {
+                fs::remove(messageFile);
 
-    // Sende die vollständige Nachricht mit "OK"
-    std::string response = "OK\n" + fullMessage.str();
-    if (send(*current_socket, response.c_str(), response.size(), 0) == -1)
-    {
-        perror("[DEBUG] send failed when sending full message");
-        return NULL;
-    }
-
-    std::cout << "[DEBUG] Message sent successfully: " << messageFile << std::endl;
-}
-
-if (message.rfind("DEL", 0) == 0) // DEL-Befehl erkannt
-{
-    std::cout << "[DEBUG] DEL command detected." << std::endl;
-
-    // Die empfangene Nachricht im Format "DEL\n<Username>\n<Message-Number>\n" parsen
-    std::istringstream stream(message);
-    std::string command, username, messageNumber;
-
-    std::getline(stream, command);        // DEL
-    std::getline(stream, username);       // Benutzername
-    std::getline(stream, messageNumber);  // Nachrichtennummer
-
-    // Leerzeichen oder Zeilenumbrüche entfernen
-    username.erase(username.find_last_not_of("\r\n") + 1);
-    messageNumber.erase(messageNumber.find_last_not_of("\r\n") + 1);
-
-    std::cout << "[DEBUG] Username: '" << username << "', Message Number: '" << messageNumber << "'" << std::endl;
-
-    // Pfad zur Nachrichtendatei
-    fs::path messageFile = "Received_Mails/" + username + "/" + messageNumber + "mail.txt";
-
-    if (fs::exists(messageFile))
-    {
-        // Datei löschen
-        fs::remove(messageFile);
-        std::cout << "[DEBUG] Deleted: " << messageFile << std::endl;
-
-        // Erfolg zurücksenden
-        if (send(*current_socket, "OK\n", 3, 0) == -1)
-        {
-            perror("[DEBUG] send failed when sending OK");
-        }
-    }
-    else
-    {
-        // Fehler zurücksenden
-        std::cout << "[DEBUG] Message file does not exist: " << messageFile << std::endl;
-        if (send(*current_socket, "ERR\n", 4, 0) == -1)
-        {
-            perror("[DEBUG] send failed when sending ERR");
-        }
-    }
-}
-
-        /*
-                else
+                if (send(*current_socket, "OK\n", 3, 0) == -1)
                 {
-                    // SEND "OK" FOR OTHER COMMANDS
-                    if (send(*current_socket, "ERR", 3, 0) == -1)
-                    {
-                        perror("send answer failed");
-                        return NULL;
-                    }
-                }*/
+                    perror("send failed when sending OK for DEL");
+                }
+            }
+            else
+            {
+                if (send(*current_socket, "ERR\n", 4, 0) == -1)
+                {
+                    perror("send failed when sending ERR for DEL");
+                }
+            }
+        }
+        else
+        {
+            if (send(*current_socket, "ERR\n", 4, 0) == -1)
+            {
+                perror("send failed for unknown command");
+            }
+        }
+
     } while (strcmp(buffer, "quit") != 0 && !abortRequested);
 
     // CLOSE CLIENT SOCKET
