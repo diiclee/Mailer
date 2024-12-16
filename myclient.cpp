@@ -11,98 +11,138 @@
 
 ///////////////////////////////////////////////////////////////////////////////
 
-void send_message(int create_socket, const std::string& sender, const std::string& receiver, const std::string& subject, const std::string& message) {
+void send_mails(int create_socket, const std::string &sender, const std::string &receiver, const std::string &subject, const std::string &message)
+{
     std::string buffer;
 
-    // Nachricht formatieren
+    // format message
     buffer = "SEND\n" + sender + "\n" + receiver + "\n" + subject + "\n" + message + "\n.\n";
 
-    // Nachricht senden
-    if (send(create_socket, buffer.c_str(), buffer.size(), 0) == -1) {
-        perror("Fehler beim Senden der Nachricht");
+    // send message
+    if (send(create_socket, buffer.c_str(), buffer.size(), 0) == -1)
+    {
+        perror("Error while sending the message");
         return;
     }
 
-    // Serverantwort lesen
+    // read server response
     char recv_buffer[BUF];
     int size = recv(create_socket, recv_buffer, BUF - 1, 0);
-    if (size == -1) {
-        perror("Fehler beim Empfangen der Serverantwort");
-    } else if (size == 0) {
-        std::cout << "Server hat die Verbindung geschlossen." << std::endl;
-    } else {
+    if (size == -1)
+    {
+        perror("Error while receiving the server response");
+    }
+    else if (size == 0)
+    {
+        std::cout << "Server closed the connection." << std::endl;
+    }
+    else
+    {
         recv_buffer[size] = '\0';
         std::cout << "Server: " << recv_buffer << std::endl;
     }
 }
 
-void list_messages(int create_socket, const std::string& username) {
+void list_mails(int create_socket, const std::string &username)
+{
     std::string buffer = "LIST\n" + username + "\n";
 
-    // LIST-Nachricht senden
-    if (send(create_socket, buffer.c_str(), buffer.size(), 0) == -1) {
-        perror("Fehler beim Senden der LIST-Anfrage");
+    // send LIST request
+    if (send(create_socket, buffer.c_str(), buffer.size(), 0) == -1)
+    {
+        perror("Error while sending the LIST request");
         return;
     }
 
-    // Serverantwort lesen
+    // read server response
     char recv_buffer[BUF];
     int size = recv(create_socket, recv_buffer, BUF - 1, 0);
-    if (size == -1) {
-        perror("Fehler beim Empfangen der Serverantwort");
-    } else if (size == 0) {
-        std::cout << "Server hat die Verbindung geschlossen." << std::endl;
-    } else {
+    if (size == -1)
+    {
+        perror("Error while receiving the server response");
+    }
+    else if (size == 0)
+    {
+        std::cout << "Server closed the connection." << std::endl;
+    }
+    else
+    {
         recv_buffer[size] = '\0';
         std::cout << "<< " << recv_buffer << std::endl;
     }
 }
 
-void read_message(int create_socket, const std::string& username, const std::string& message_number) {
+void read_mails(int create_socket, const std::string &username, const std::string &message_number)
+{
     std::string buffer = "READ\n" + username + "\n" + message_number + "\n";
 
-    // READ-Nachricht senden
-    if (send(create_socket, buffer.c_str(), buffer.size(), 0) == -1) {
-        perror("Fehler beim Senden der READ-Anfrage");
+    // send READ request
+    if (send(create_socket, buffer.c_str(), buffer.size(), 0) == -1)
+    {
+        perror("Error while sending the READ request");
         return;
     }
 
-    // Serverantwort lesen
+    // read server response
     char recv_buffer[BUF];
     int size = recv(create_socket, recv_buffer, BUF - 1, 0);
-    if (size == -1) {
-        perror("Fehler beim Empfangen der Serverantwort");
-    } else if (size == 0) {
-        std::cout << "Server hat die Verbindung geschlossen." << std::endl;
-    } else {
+    if (size == -1)
+    {
+        perror("Error while receiving the server response");
+    }
+    else if (size == 0)
+    {
+        std::cout << "Server closed the connection." << std::endl;
+    }
+    else
+    {
         recv_buffer[size] = '\0';
         std::cout << "<< " << recv_buffer << std::endl;
     }
 }
 
-void delete_message(int create_socket, const std::string& username, const std::string& message_number) {
+void delete_mails(int create_socket, const std::string &username, const std::string &message_number)
+{
     std::string buffer = "DEL\n" + username + "\n" + message_number + "\n";
 
-    // DEL-Nachricht senden
-    if (send(create_socket, buffer.c_str(), buffer.size(), 0) == -1) {
-        perror("Fehler beim Senden der DEL-Anfrage");
+    // send DEL request
+    if (send(create_socket, buffer.c_str(), buffer.size(), 0) == -1)
+    {
+        perror("Error while sending the DELETE request");
         return;
     }
 
-    // Serverantwort lesen
+    // read server response
     char recv_buffer[BUF];
     int size = recv(create_socket, recv_buffer, BUF - 1, 0);
-    if (size == -1) {
-        perror("Fehler beim Empfangen der Serverantwort");
-    } else if (size == 0) {
-        std::cout << "Server hat die Verbindung geschlossen." << std::endl;
-    } else {
+    if (size == -1)
+    {
+        perror("Error while receiving the server response");
+    }
+    else if (size == 0)
+    {
+        std::cout << "Server closed the connection." << std::endl;
+    }
+    else
+    {
         recv_buffer[size] = '\0';
         std::cout << "<< " << recv_buffer << std::endl;
     }
 }
 
-int main(int argc, char **argv) {
+// display commands to the user
+void display_commands()
+{
+    std::cout << "Choose your command:" << std::endl;
+    std::cout << "SEND" << std::endl;
+    std::cout << "LIST" << std::endl;
+    std::cout << "READ" << std::endl;
+    std::cout << "DEL" << std::endl;
+    std::cout << "QUIT" << std::endl;
+}
+
+int main(int argc, char **argv)
+{
     int create_socket;
     char buffer[BUF];
     struct sockaddr_in address;
@@ -110,7 +150,8 @@ int main(int argc, char **argv) {
 
     ////////////////////////////////////////////////////////////////////////////
     // CREATE A SOCKET
-    if ((create_socket = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
+    if ((create_socket = socket(AF_INET, SOCK_STREAM, 0)) == -1)
+    {
         perror("Socket error");
         return EXIT_FAILURE;
     }
@@ -121,15 +162,20 @@ int main(int argc, char **argv) {
     address.sin_family = AF_INET;
     address.sin_port = htons(PORT);
 
-    if (argc < 2) {
+    // default to localhost if no address is provided
+    if (argc < 2)
+    {
         inet_aton("127.0.0.1", &address.sin_addr);
-    } else {
+    }
+    else
+    {
         inet_aton(argv[1], &address.sin_addr);
     }
 
     ////////////////////////////////////////////////////////////////////////////
     // CREATE A CONNECTION
-    if (connect(create_socket, (struct sockaddr *)&address, sizeof(address)) == -1) {
+    if (connect(create_socket, (struct sockaddr *)&address, sizeof(address)) == -1)
+    {
         perror("Connect error - no server available");
         return EXIT_FAILURE;
     }
@@ -139,81 +185,105 @@ int main(int argc, char **argv) {
     ////////////////////////////////////////////////////////////////////////////
     // RECEIVE DATA
     int size = recv(create_socket, buffer, BUF - 1, 0);
-    if (size == -1) {
+    if (size == -1)
+    {
         perror("recv error");
-    } else if (size == 0) {
+    }
+    else if (size == 0)
+    {
         std::cout << "Server closed remote socket" << std::endl;
-    } else {
+    }
+    else
+    {
         buffer[size] = '\0';
         std::cout << buffer;
     }
 
-    do {
+    do
+    {
+        // display commands and prompt user for input
+        display_commands();
         std::cout << ">> ";
-        if (std::cin.getline(buffer, BUF)) {
+        if (std::cin.getline(buffer, BUF))
+        {
             std::string command(buffer);
 
-            if (command == "quit") {
+            if (command == "QUIT")
+            {
                 isQuit = true;
-            } else if (command == "SEND") {
-                // Eingabe für SEND-Befehl sammeln
+            }
+            else if (command == "SEND")
+            {
+                // collect inputs for the SEND command
                 std::string sender, receiver, subject, message, line;
 
-                std::cout << "Absender: ";
+                std::cout << "Sender: ";
                 std::getline(std::cin, sender);
 
-                std::cout << "Empfänger: ";
+                std::cout << "Receiver: ";
                 std::getline(std::cin, receiver);
 
-                std::cout << "Betreff: ";
+                std::cout << "Subject: ";
                 std::getline(std::cin, subject);
 
-                std::cout << "Nachricht (mehrzeilig, beende mit '.'): \n";
-                while (std::getline(std::cin, line) && line != ".") {
+                std::cout << "Message (multi-line, end with '.'): \n";
+                while (std::getline(std::cin, line) && line != ".")
+                {
                     message += line + "\n";
                 }
 
-                // SEND-Nachricht senden
-                send_message(create_socket, sender, receiver, subject, message);
-            } else if (command == "LIST") {
-                // LIST-Befehl verarbeiten
+                // send SEND command
+                send_mails(create_socket, sender, receiver, subject, message);
+            }
+            else if (command == "LIST")
+            {
+                // handle LIST 
                 std::string username;
-                std::cout << "Benutzername: ";
+                std::cout << "Username: ";
                 std::getline(std::cin, username);
 
-                list_messages(create_socket, username);
-            } else if (command == "READ") {
-                // READ-Befehl verarbeiten
+                list_mails(create_socket, username);
+            }
+            else if (command == "READ")
+            {
+                // handle READ 
                 std::string username, message_number;
-                std::cout << "Benutzername: ";
+                std::cout << "Username: ";
                 std::getline(std::cin, username);
-                std::cout << "Nachrichtennummer: ";
+                std::cout << "Message number: ";
                 std::getline(std::cin, message_number);
 
-                read_message(create_socket, username, message_number);
-            } else if (command == "DEL") {
-                // DEL-Befehl verarbeiten
+                read_mails(create_socket, username, message_number);
+            }
+            else if (command == "DEL")
+            {
+                // handle DEL
                 std::string username, message_number;
-                std::cout << "Benutzername: ";
+                std::cout << "Username: ";
                 std::getline(std::cin, username);
-                std::cout << "Nachrichtennummer: ";
+                std::cout << "Message number: ";
                 std::getline(std::cin, message_number);
 
-                delete_message(create_socket, username, message_number);
-            } else {
-                // Andere Befehle senden
-                std::cerr << "Unbekannter Befehl: " << command << std::endl;
+                delete_mails(create_socket, username, message_number);
+            }
+            else
+            {
+                // unknown command
+                std::cerr << "Unknown command: " << command << std::endl;
             }
         }
     } while (!isQuit);
 
     ////////////////////////////////////////////////////////////////////////////
-    // CLOSES THE DESCRIPTOR
-    if (create_socket != -1) {
-        if (shutdown(create_socket, SHUT_RDWR) == -1) {
+    // CLOSE THE SOCKET
+    if (create_socket != -1)
+    {
+        if (shutdown(create_socket, SHUT_RDWR) == -1)
+        {
             perror("shutdown create_socket");
         }
-        if (close(create_socket) == -1) {
+        if (close(create_socket) == -1)
+        {
             perror("close create_socket");
         }
         create_socket = -1;

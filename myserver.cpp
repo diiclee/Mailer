@@ -10,24 +10,25 @@
 #include <iostream>
 #include <fstream>
 #include <sstream>
-#include <filesystem> // C++17 erforderlich
-#include <algorithm>  // for std::sort
+#include <filesystem> 
+#include <algorithm>  
 #include <vector>
 namespace fs = std::filesystem;
 
 ///////////////////////////////////////////////////////////////////////////////
 
-#define BUF 1024
-#define PORT 6543
+#define BUF 1024  // Buffer size
+#define PORT 6543 // Port number
 
 ///////////////////////////////////////////////////////////////////////////////
 
-int abortRequested = 0;
-int create_socket = -1;
-int new_socket = -1;
+int abortRequested = 0; 
+int create_socket = -1; 
+int new_socket = -1;    
 
 ///////////////////////////////////////////////////////////////////////////////
 
+// functions
 void *clientCommunication(void *data);
 void signalHandler(int sig);
 
@@ -40,10 +41,10 @@ int main(void)
     int reuseValue = 1;
 
     ////////////////////////////////////////////////////////////////////////////
-    // SIGNAL HANDLER
+    // SET UP SIGNAL HANDLER
     if (signal(SIGINT, signalHandler) == SIG_ERR)
     {
-        perror("signal can not be registered");
+        perror("Failed to register signal handler");
         return EXIT_FAILURE;
     }
 
@@ -51,7 +52,7 @@ int main(void)
     // CREATE A SOCKET
     if ((create_socket = socket(AF_INET, SOCK_STREAM, 0)) == -1)
     {
-        perror("Socket error");
+        perror("Failed to create socket");
         return EXIT_FAILURE;
     }
 
@@ -59,61 +60,62 @@ int main(void)
     // SET SOCKET OPTIONS
     if (setsockopt(create_socket, SOL_SOCKET, SO_REUSEADDR, &reuseValue, sizeof(reuseValue)) == -1)
     {
-        perror("set socket options - reuseAddr");
+        perror("Failed to set socket options - SO_REUSEADDR");
         return EXIT_FAILURE;
     }
 
     if (setsockopt(create_socket, SOL_SOCKET, SO_REUSEPORT, &reuseValue, sizeof(reuseValue)) == -1)
     {
-        perror("set socket options - reusePort");
+        perror("Failed to set socket options - SO_REUSEPORT");
         return EXIT_FAILURE;
     }
 
     ////////////////////////////////////////////////////////////////////////////
-    // INIT ADDRESS
+    // INITIALIZE SERVER ADDRESS
     memset(&address, 0, sizeof(address));
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = INADDR_ANY;
-    address.sin_port = htons(PORT);
+    address.sin_family = AF_INET;         
+    address.sin_addr.s_addr = INADDR_ANY; 
+    address.sin_port = htons(PORT);       
 
     ////////////////////////////////////////////////////////////////////////////
-    // ASSIGN AN ADDRESS WITH PORT TO SOCKET
+    // BIND SOCKET TO AN ADDRESS
     if (bind(create_socket, (struct sockaddr *)&address, sizeof(address)) == -1)
     {
-        perror("bind error");
+        perror("Failed to bind socket");
         return EXIT_FAILURE;
     }
 
     ////////////////////////////////////////////////////////////////////////////
-    // ALLOW CONNECTION ESTABLISHING
-    if (listen(create_socket, 5) == -1)
+    // START LISTENING FOR CONNECTIONS
+    if (listen(create_socket, 5) == -1) 
     {
-        perror("listen error");
+        perror("Failed to listen on socket");
         return EXIT_FAILURE;
     }
 
+    // main server loop
     while (!abortRequested)
     {
         printf("Waiting for connections...\n");
 
         /////////////////////////////////////////////////////////////////////////
-        // ACCEPTS CONNECTION SETUP
+        // ACCEPT INCOMING CONNECTIONS
         addrlen = sizeof(struct sockaddr_in);
         if ((new_socket = accept(create_socket, (struct sockaddr *)&cliaddress, &addrlen)) == -1)
         {
             if (abortRequested)
             {
-                perror("accept error after aborted");
+                perror("Accept error after shutdown request");
             }
             else
             {
-                perror("accept error");
+                perror("Accept error");
             }
             break;
         }
 
         /////////////////////////////////////////////////////////////////////////
-        // START CLIENT
+        // HANDLE CLIENT COMMUNICATION
         printf("Client connected from %s:%d...\n",
                inet_ntoa(cliaddress.sin_addr),
                ntohs(cliaddress.sin_port));
@@ -121,16 +123,16 @@ int main(void)
         new_socket = -1;
     }
 
-    // CLOSE SERVER SOCKET
+    // close server socket
     if (create_socket != -1)
     {
         if (shutdown(create_socket, SHUT_RDWR) == -1)
         {
-            perror("shutdown create_socket");
+            perror("Failed to shutdown server socket");
         }
         if (close(create_socket) == -1)
         {
-            perror("close create_socket");
+            perror("Failed to close server socket");
         }
         create_socket = -1;
     }
@@ -138,106 +140,109 @@ int main(void)
     return EXIT_SUCCESS;
 }
 
+// handle client communication
 void *clientCommunication(void *data)
 {
     char buffer[BUF];
     int size;
     int *current_socket = (int *)data;
 
-    // SEND WELCOME MESSAGE
-    strcpy(buffer, "Welcome to myserver!\r\nPlease enter your commands...\r\n");
+    strcpy(buffer, "Welcome!\r\n");
     if (send(*current_socket, buffer, strlen(buffer), 0) == -1)
     {
-        perror("send failed");
+        perror("Failed to send welcome message");
         return NULL;
     }
 
+    // communication loop
     do
     {
-        size = recv(*current_socket, buffer, BUF - 1, 0);
+        size = recv(*current_socket, buffer, BUF - 1, 0); // data from client
         if (size == -1)
         {
             if (abortRequested)
             {
-                perror("recv error after aborted");
+                perror("Receive error after shutdown request");
             }
             else
             {
-                perror("recv error");
+                perror("Receive error");
             }
             break;
         }
 
-        if (size == 0)
+        if (size == 0) // client closed the connection
         {
             printf("Client closed remote socket\n");
             break;
         }
 
-        buffer[size] = '\0';
+        buffer[size] = '\0'; 
         std::string message(buffer);
 
+        // process SEND
         if (message.rfind("SEND", 0) == 0)
         {
             std::istringstream stream(message);
             std::string command, sender, receiver, subject, msgBody, line;
 
-            std::getline(stream, command);  // "SEND"
-            std::getline(stream, sender);   // Sender
-            std::getline(stream, receiver); // Empfänger
-            std::getline(stream, subject);  // Betreff
+            std::getline(stream, command);  
+            std::getline(stream, sender);   
+            std::getline(stream, receiver); 
+            std::getline(stream, subject);  
 
             while (std::getline(stream, line) && line != ".")
             {
                 msgBody += line + "\n";
             }
 
-            // CREATE RECEIVER FOLDER IF NOT EXISTS
-            fs::path receiverFolder = "Received_Mails/" + receiver;
+            // create mails folder if not already created
+            fs::path receiverFolder = "mails/" + receiver;
             if (!fs::exists(receiverFolder))
             {
                 fs::create_directories(receiverFolder);
             }
 
-            // SAVE MAIL
+            // save the mail
             int mailCount = std::distance(fs::directory_iterator(receiverFolder), fs::directory_iterator{});
             fs::path mailFile = receiverFolder / (std::to_string(mailCount + 1) + "mail.txt");
 
             std::ofstream outFile(mailFile);
             if (outFile.is_open())
             {
-                outFile << "Absender: " << sender << "\n";
-                outFile << "Empfänger: " << receiver << "\n";
-                outFile << "Betreff: " << subject << "\n\n";
+                outFile << "Sender: " << sender << "\n";
+                outFile << "Receiver: " << receiver << "\n";
+                outFile << "Subject: " << subject << "\n\n";
                 outFile << msgBody;
                 outFile.close();
 
                 if (send(*current_socket, "OK\r\n", 4, 0) == -1)
                 {
-                    perror("send answer failed");
+                    perror("Failed to send confirmation");
                     return NULL;
                 }
             }
             else
             {
-                std::cerr << "Fehler beim Öffnen der Datei: " << mailFile << std::endl;
+                std::cerr << "Error opening file: " << mailFile << std::endl;
             }
         }
+        // process LIST 
         else if (message.rfind("LIST", 0) == 0)
         {
             std::istringstream stream(message);
             std::string command, username;
-            std::getline(stream, command);  // "LIST"
-            std::getline(stream, username); // Username
+            std::getline(stream, command);  
+            std::getline(stream, username); 
 
-            fs::path userFolder = "Received_Mails/" + username;
+            fs::path userFolder = "mails/" + username;
             std::ostringstream response;
             std::vector<fs::path> files;
             std::ostringstream subjects;
 
             if (!fs::exists(userFolder) || fs::is_empty(userFolder))
             {
-                response << "Count of messages of user:  0\n";
+                response << "Count of messages of user: 0\n";
             }
             else
             {
@@ -258,14 +263,14 @@ void *clientCommunication(void *data)
                     std::ifstream mailFile(file);
                     if (!mailFile.is_open())
                     {
-                        std::cerr << "Fehler beim Öffnen der Datei: " << file << std::endl;
+                        std::cerr << "Error opening file: " << file << std::endl;
                         continue;
                     }
 
                     std::string line;
                     while (std::getline(mailFile, line))
                     {
-                        if (line.rfind("Betreff: ", 0) == 0)
+                        if (line.rfind("Subject: ", 0) == 0)
                         {
                             subjects << line.substr(9) << "\n";
                             break;
@@ -275,31 +280,33 @@ void *clientCommunication(void *data)
                     ++messageCount;
                 }
 
-                response << "Count of messages of user:  " << messageCount << "\n";
+                response << "Count of messages of user: " << messageCount << "\n";
                 response << subjects.str();
             }
 
+            // send response to client
             if (send(*current_socket, response.str().c_str(), response.str().size(), 0) == -1)
             {
-                perror("send failed when sending LIST response");
+                perror("Failed to send LIST response");
                 return NULL;
             }
         }
+        // process READ 
         else if (message.rfind("READ", 0) == 0)
         {
             std::istringstream stream(message);
             std::string command, username, messageNumber;
-            std::getline(stream, command);        // READ
-            std::getline(stream, username);       // Benutzername
-            std::getline(stream, messageNumber);  // Nachrichtennummer
+            std::getline(stream, command);       
+            std::getline(stream, username);     
+            std::getline(stream, messageNumber); 
 
-            fs::path messageFile = "Received_Mails/" + username + "/" + messageNumber + "mail.txt";
+            fs::path messageFile = "mails/" + username + "/" + messageNumber + "mail.txt";
 
             if (!fs::exists(messageFile))
             {
                 if (send(*current_socket, "ERR\n", 4, 0) == -1)
                 {
-                    perror("send failed when sending ERR");
+                    perror("Failed to send ERR response for READ");
                 }
                 return NULL;
             }
@@ -309,7 +316,7 @@ void *clientCommunication(void *data)
             {
                 if (send(*current_socket, "ERR\n", 4, 0) == -1)
                 {
-                    perror("send failed when sending ERR");
+                    perror("Failed to send ERR response for READ");
                 }
                 return NULL;
             }
@@ -325,19 +332,20 @@ void *clientCommunication(void *data)
             std::string response = "OK\n" + fullMessage.str();
             if (send(*current_socket, response.c_str(), response.size(), 0) == -1)
             {
-                perror("send failed when sending READ message");
+                perror("Failed to send READ response");
                 return NULL;
             }
         }
+        // process DEL 
         else if (message.rfind("DEL", 0) == 0)
         {
             std::istringstream stream(message);
             std::string command, username, messageNumber;
-            std::getline(stream, command);        // DEL
-            std::getline(stream, username);       // Benutzername
-            std::getline(stream, messageNumber);  // Nachrichtennummer
+            std::getline(stream, command);       
+            std::getline(stream, username);      
+            std::getline(stream, messageNumber); 
 
-            fs::path messageFile = "Received_Mails/" + username + "/" + messageNumber + "mail.txt";
+            fs::path messageFile = "mails/" + username + "/" + messageNumber + "mail.txt";
 
             if (fs::exists(messageFile))
             {
@@ -345,37 +353,38 @@ void *clientCommunication(void *data)
 
                 if (send(*current_socket, "OK\n", 3, 0) == -1)
                 {
-                    perror("send failed when sending OK for DEL");
+                    perror("Failed to send OK response for DEL");
                 }
             }
             else
             {
                 if (send(*current_socket, "ERR\n", 4, 0) == -1)
                 {
-                    perror("send failed when sending ERR for DEL");
+                    perror("Failed to send ERR response for DEL");
                 }
             }
         }
+        // handle unknown commands
         else
         {
             if (send(*current_socket, "ERR\n", 4, 0) == -1)
             {
-                perror("send failed for unknown command");
+                perror("Failed to send ERR for unknown command");
             }
         }
 
-    } while (strcmp(buffer, "quit") != 0 && !abortRequested);
+    } while (strcmp(buffer, "QUIT") != 0 && !abortRequested);
 
-    // CLOSE CLIENT SOCKET
+    // close client socket
     if (*current_socket != -1)
     {
         if (shutdown(*current_socket, SHUT_RDWR) == -1)
         {
-            perror("shutdown new_socket");
+            perror("Failed to shutdown client socket");
         }
         if (close(*current_socket) == -1)
         {
-            perror("close new_socket");
+            perror("Failed to close client socket");
         }
         *current_socket = -1;
     }
@@ -383,35 +392,38 @@ void *clientCommunication(void *data)
     return NULL;
 }
 
+// signal handler to clean up sockets on shutdown
 void signalHandler(int sig)
 {
     if (sig == SIGINT)
     {
-        printf("abort Requested... ");
+        printf("Abort requested... ");
         abortRequested = 1;
 
+        // close client socket if open
         if (new_socket != -1)
         {
             if (shutdown(new_socket, SHUT_RDWR) == -1)
             {
-                perror("shutdown new_socket");
+                perror("Failed to shutdown client socket");
             }
             if (close(new_socket) == -1)
             {
-                perror("close new_socket");
+                perror("Failed to close client socket");
             }
             new_socket = -1;
         }
 
+        // close server socket if open
         if (create_socket != -1)
         {
             if (shutdown(create_socket, SHUT_RDWR) == -1)
             {
-                perror("shutdown create_socket");
+                perror("Failed to shutdown server socket");
             }
             if (close(create_socket) == -1)
             {
-                perror("close create_socket");
+                perror("Failed to close server socket");
             }
             create_socket = -1;
         }
