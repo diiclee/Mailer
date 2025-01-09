@@ -10,21 +10,24 @@
 #include <iostream>
 #include <fstream>
 #include <sstream>
-#include <filesystem> 
-#include <algorithm>  
+#include <filesystem>
+#include <algorithm>
 #include <vector>
+
 namespace fs = std::filesystem;
 
 ///////////////////////////////////////////////////////////////////////////////
 
 #define BUF 1024  // Buffer size
-#define PORT 6543 // Port number
 
 ///////////////////////////////////////////////////////////////////////////////
 
-int abortRequested = 0; 
-int create_socket = -1; 
-int new_socket = -1;    
+int abortRequested = 0;
+int create_socket = -1;
+int new_socket = -1;
+
+// Globale Variable für den Mail-Ordner
+std::string mailFolder;
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -34,8 +37,28 @@ void signalHandler(int sig);
 
 ///////////////////////////////////////////////////////////////////////////////
 
-int main(void)
+int main(int argc, char **argv)
 {
+    if (argc < 3)
+    {
+        std::cerr << "Usage: " << argv[0] << " <port> <mail_folder>" << std::endl;
+        return EXIT_FAILURE;
+    }
+
+    int port = std::stoi(argv[1]); // Port aus Argument 1 lesen
+    mailFolder = argv[2];          // Ordnername in die globale Variable speichern
+
+    // Ordner prüfen/erstellen
+    if (!fs::exists(mailFolder))
+    {
+        fs::create_directories(mailFolder);
+        std::cout << "Created mail folder: " << mailFolder << std::endl;
+    }
+    else
+    {
+        std::cout << "Using existing mail folder: " << mailFolder << std::endl;
+    }
+
     socklen_t addrlen;
     struct sockaddr_in address, cliaddress;
     int reuseValue = 1;
@@ -73,9 +96,9 @@ int main(void)
     ////////////////////////////////////////////////////////////////////////////
     // INITIALIZE SERVER ADDRESS
     memset(&address, 0, sizeof(address));
-    address.sin_family = AF_INET;         
-    address.sin_addr.s_addr = INADDR_ANY; 
-    address.sin_port = htons(PORT);       
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = INADDR_ANY;
+    address.sin_port = htons(port);
 
     ////////////////////////////////////////////////////////////////////////////
     // BIND SOCKET TO AN ADDRESS
@@ -87,7 +110,7 @@ int main(void)
 
     ////////////////////////////////////////////////////////////////////////////
     // START LISTENING FOR CONNECTIONS
-    if (listen(create_socket, 5) == -1) 
+    if (listen(create_socket, 5) == -1)
     {
         perror("Failed to listen on socket");
         return EXIT_FAILURE;
@@ -141,6 +164,7 @@ int main(void)
 }
 
 // handle client communication
+// handle client communication
 void *clientCommunication(void *data)
 {
     char buffer[BUF];
@@ -160,14 +184,7 @@ void *clientCommunication(void *data)
         size = recv(*current_socket, buffer, BUF - 1, 0); // data from client
         if (size == -1)
         {
-            if (abortRequested)
-            {
-                perror("Receive error after shutdown request");
-            }
-            else
-            {
-                perror("Receive error");
-            }
+            perror("Receive error");
             break;
         }
 
@@ -177,199 +194,169 @@ void *clientCommunication(void *data)
             break;
         }
 
-        buffer[size] = '\0'; 
+        buffer[size] = '\0'; // Null-terminierte Zeichenkette
         std::string message(buffer);
 
         // process SEND
-        if (message.rfind("SEND", 0) == 0)
+if (message.rfind("SEND", 0) == 0)
+{
+    std::istringstream stream(message);
+    std::string command, sender, receiver, subject, msgBody, line;
+
+    std::getline(stream, command);  
+    std::getline(stream, sender);   
+    std::getline(stream, receiver); 
+    std::getline(stream, subject);  
+
+    while (std::getline(stream, line) && line != ".")
+    {
+        msgBody += line + "\n";
+    }
+
+    // Empfängerordner basierend auf mailFolder erstellen
+    fs::path receiverFolder = fs::path(mailFolder) / receiver;
+    if (!fs::exists(receiverFolder))
+    {
+        fs::create_directories(receiverFolder);
+        std::cout << "Created folder for receiver: " << receiverFolder << std::endl;
+    }
+
+    // Nachricht speichern
+    int mailCount = std::distance(fs::directory_iterator(receiverFolder), fs::directory_iterator{});
+    fs::path mailFile = receiverFolder / (std::to_string(mailCount + 1) + "mail.txt");
+
+    std::ofstream outFile(mailFile);
+    if (outFile.is_open())
+    {
+        outFile << "Sender: " << sender << "\n";
+        outFile << "Receiver: " << receiver << "\n";
+        outFile << "Subject: " << subject << "\n\n";
+        outFile << msgBody;
+        outFile.close();
+
+        std::cout << "Message saved successfully to: " << mailFile << std::endl;
+
+        // Bestätigung an den Client senden
+        if (send(*current_socket, "OK\r\n", 4, 0) == -1)
         {
-            std::istringstream stream(message);
-            std::string command, sender, receiver, subject, msgBody, line;
-
-            std::getline(stream, command);  
-            std::getline(stream, sender);   
-            std::getline(stream, receiver); 
-            std::getline(stream, subject);  
-
-            while (std::getline(stream, line) && line != ".")
-            {
-                msgBody += line + "\n";
-            }
-
-            // create mails folder if not already created
-            fs::path receiverFolder = "mails/" + receiver;
-            if (!fs::exists(receiverFolder))
-            {
-                fs::create_directories(receiverFolder);
-            }
-
-            // save the mail
-            int mailCount = std::distance(fs::directory_iterator(receiverFolder), fs::directory_iterator{});
-            fs::path mailFile = receiverFolder / (std::to_string(mailCount + 1) + "mail.txt");
-
-            std::ofstream outFile(mailFile);
-            if (outFile.is_open())
-            {
-                outFile << "Sender: " << sender << "\n";
-                outFile << "Receiver: " << receiver << "\n";
-                outFile << "Subject: " << subject << "\n\n";
-                outFile << msgBody;
-                outFile.close();
-
-                if (send(*current_socket, "OK\r\n", 4, 0) == -1)
-                {
-                    perror("Failed to send confirmation");
-                    return NULL;
-                }
-            }
-            else
-            {
-                std::cerr << "Error opening file: " << mailFile << std::endl;
-            }
+            perror("Failed to send confirmation");
+            return NULL;
         }
-        // process LIST 
+    }
+    else
+    {
+        std::cerr << "Error opening file: " << mailFile << std::endl;
+        if (send(*current_socket, "ERR\r\n", 5, 0) == -1)
+        {
+            perror("Failed to send error message");
+        }
+    }
+}
+
+        // process LIST
         else if (message.rfind("LIST", 0) == 0)
         {
             std::istringstream stream(message);
             std::string command, username;
-            std::getline(stream, command);  
-            std::getline(stream, username); 
+            std::getline(stream, command);
+            std::getline(stream, username);
 
-            fs::path userFolder = "mails/" + username;
+            fs::path userFolder = fs::path(mailFolder) / username;
             std::ostringstream response;
-            std::vector<fs::path> files;
-            std::ostringstream subjects;
 
             if (!fs::exists(userFolder) || fs::is_empty(userFolder))
             {
-                response << "Count of messages of user: 0\n";
+                response << "0\n";
             }
             else
             {
-                int messageCount = 0;
-
+                int count = 0;
                 for (const auto &entry : fs::directory_iterator(userFolder))
                 {
                     if (entry.is_regular_file())
                     {
-                        files.push_back(entry.path());
-                    }
-                }
-
-                std::sort(files.begin(), files.end());
-
-                for (const auto &file : files)
-                {
-                    std::ifstream mailFile(file);
-                    if (!mailFile.is_open())
-                    {
-                        std::cerr << "Error opening file: " << file << std::endl;
-                        continue;
-                    }
-
-                    std::string line;
-                    while (std::getline(mailFile, line))
-                    {
-                        if (line.rfind("Subject: ", 0) == 0)
+                        count++;
+                        std::ifstream mailFile(entry.path());
+                        std::string line;
+                        while (std::getline(mailFile, line))
                         {
-                            subjects << line.substr(9) << "\n";
-                            break;
+                            if (line.rfind("Subject: ", 0) == 0)
+                            {
+                                response << line.substr(9) << "\n";
+                                break;
+                            }
                         }
                     }
-                    mailFile.close();
-                    ++messageCount;
                 }
-
-                response << "Count of messages of user: " << messageCount << "\n";
-                response << subjects.str();
+                response << count << "\n";
             }
 
-            // send response to client
-            if (send(*current_socket, response.str().c_str(), response.str().size(), 0) == -1)
+            if (send(*current_socket, response.str().c_str(), response.str().length(), 0) == -1)
             {
                 perror("Failed to send LIST response");
-                return NULL;
             }
         }
-        // process READ 
+        // process READ
         else if (message.rfind("READ", 0) == 0)
         {
             std::istringstream stream(message);
             std::string command, username, messageNumber;
-            std::getline(stream, command);       
-            std::getline(stream, username);     
-            std::getline(stream, messageNumber); 
+            std::getline(stream, command);
+            std::getline(stream, username);
+            std::getline(stream, messageNumber);
 
-            fs::path messageFile = "mails/" + username + "/" + messageNumber + "mail.txt";
-
-            if (!fs::exists(messageFile))
-            {
-                if (send(*current_socket, "ERR\n", 4, 0) == -1)
-                {
-                    perror("Failed to send ERR response for READ");
-                }
-                return NULL;
-            }
-
-            std::ifstream mailFile(messageFile);
-            if (!mailFile.is_open())
-            {
-                if (send(*current_socket, "ERR\n", 4, 0) == -1)
-                {
-                    perror("Failed to send ERR response for READ");
-                }
-                return NULL;
-            }
-
-            std::ostringstream fullMessage;
-            std::string line;
-            while (std::getline(mailFile, line))
-            {
-                fullMessage << line << "\n";
-            }
-            mailFile.close();
-
-            std::string response = "OK\n" + fullMessage.str();
-            if (send(*current_socket, response.c_str(), response.size(), 0) == -1)
-            {
-                perror("Failed to send READ response");
-                return NULL;
-            }
-        }
-        // process DEL 
-        else if (message.rfind("DEL", 0) == 0)
-        {
-            std::istringstream stream(message);
-            std::string command, username, messageNumber;
-            std::getline(stream, command);       
-            std::getline(stream, username);      
-            std::getline(stream, messageNumber); 
-
-            fs::path messageFile = "mails/" + username + "/" + messageNumber + "mail.txt";
-
+            fs::path messageFile = fs::path(mailFolder) / username / (messageNumber + "mail.txt");
             if (fs::exists(messageFile))
             {
-                fs::remove(messageFile);
-
-                if (send(*current_socket, "OK\n", 3, 0) == -1)
+                std::ifstream mailFile(messageFile);
+                std::ostringstream content;
+                content << "OK\n";
+                content << mailFile.rdbuf();
+                if (send(*current_socket, content.str().c_str(), content.str().length(), 0) == -1)
                 {
-                    perror("Failed to send OK response for DEL");
+                    perror("Failed to send READ response");
                 }
             }
             else
             {
                 if (send(*current_socket, "ERR\n", 4, 0) == -1)
                 {
-                    perror("Failed to send ERR response for DEL");
+                    perror("Failed to send READ error response");
                 }
             }
         }
-        // handle unknown commands
+        // process DEL
+        else if (message.rfind("DEL", 0) == 0)
+        {
+            std::istringstream stream(message);
+            std::string command, username, messageNumber;
+            std::getline(stream, command);
+            std::getline(stream, username);
+            std::getline(stream, messageNumber);
+
+            fs::path messageFile = fs::path(mailFolder) / username / (messageNumber + "mail.txt");
+            if (fs::exists(messageFile))
+            {
+                fs::remove(messageFile);
+                if (send(*current_socket, "OK\n", 3, 0) == -1)
+                {
+                    perror("Failed to send DEL confirmation");
+                }
+            }
+            else
+            {
+                if (send(*current_socket, "ERR\n", 4, 0) == -1)
+                {
+                    perror("Failed to send DEL error response");
+                }
+            }
+        }
+        // unknown command
         else
         {
             if (send(*current_socket, "ERR\n", 4, 0) == -1)
             {
-                perror("Failed to send ERR for unknown command");
+                perror("Failed to send unknown command error");
             }
         }
 
@@ -392,6 +379,7 @@ void *clientCommunication(void *data)
     return NULL;
 }
 
+
 // signal handler to clean up sockets on shutdown
 void signalHandler(int sig)
 {
@@ -400,7 +388,6 @@ void signalHandler(int sig)
         printf("Abort requested... ");
         abortRequested = 1;
 
-        // close client socket if open
         if (new_socket != -1)
         {
             if (shutdown(new_socket, SHUT_RDWR) == -1)
@@ -414,7 +401,6 @@ void signalHandler(int sig)
             new_socket = -1;
         }
 
-        // close server socket if open
         if (create_socket != -1)
         {
             if (shutdown(create_socket, SHUT_RDWR) == -1)

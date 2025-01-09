@@ -1,6 +1,0 @@
-Sender: tester
-Receiver: tester3
-Subject: testing again here
-
-message example
-

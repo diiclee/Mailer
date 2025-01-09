@@ -7,7 +7,6 @@
 ///////////////////////////////////////////////////////////////////////////////
 
 #define BUF 1024
-#define PORT 6543
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -160,6 +159,15 @@ void display_commands()
 
 int main(int argc, char **argv)
 {
+    if (argc < 3)
+    {
+        std::cerr << "Usage: " << argv[0] << " <server_ip> <port>" << std::endl;
+        return EXIT_FAILURE;
+    }
+
+    const char *server_ip = argv[1];
+    int port = std::stoi(argv[2]);
+
     int create_socket;
     char buffer[BUF];
     struct sockaddr_in address;
@@ -177,16 +185,12 @@ int main(int argc, char **argv)
     // INIT ADDRESS
     memset(&address, 0, sizeof(address));
     address.sin_family = AF_INET;
-    address.sin_port = htons(PORT);
+    address.sin_port = htons(port);
 
-    // default to localhost if no address is provided
-    if (argc < 2)
+    if (inet_aton(server_ip, &address.sin_addr) == 0)
     {
-        inet_aton("127.0.0.1", &address.sin_addr);
-    }
-    else
-    {
-        inet_aton(argv[1], &address.sin_addr);
+        perror("Invalid IP address");
+        return EXIT_FAILURE;
     }
 
     ////////////////////////////////////////////////////////////////////////////
@@ -234,26 +238,29 @@ int main(int argc, char **argv)
                 // collect inputs for the SEND command
                 std::string sender, receiver, subject, message, line;
 
-                while(true){
+                while (true)
+                {
                     std::cout << "Sender: ";
                     std::getline(std::cin, sender);
-                    if(checkUsernameLength(sender))
+                    if (checkUsernameLength(sender))
                         break;
                     std::cout << "Username too long! Must be less than 8 characters!" << std::endl;
                 }
 
-                while(true){
+                while (true)
+                {
                     std::cout << "Receiver: ";
                     std::getline(std::cin, receiver);
-                    if(checkUsernameLength(receiver))
+                    if (checkUsernameLength(receiver))
                         break;
                     std::cout << "Username too long! Must be less than 8 characters!" << std::endl;
                 }
 
-                while(true){
+                while (true)
+                {
                     std::cout << "Subject: ";
                     std::getline(std::cin, subject);
-                    if(checkSubjectLength(subject))
+                    if (checkSubjectLength(subject))
                         break;
                     std::cout << "Subject too long. Subject must be less than 80 characters long." << std::endl;
                 }
@@ -269,7 +276,7 @@ int main(int argc, char **argv)
             }
             else if (command == "LIST")
             {
-                // handle LIST 
+                // handle LIST
                 std::string username;
                 std::cout << "Username: ";
                 std::getline(std::cin, username);
@@ -278,7 +285,7 @@ int main(int argc, char **argv)
             }
             else if (command == "READ")
             {
-                // handle READ 
+                // handle READ
                 std::string username, message_number;
                 std::cout << "Username: ";
                 std::getline(std::cin, username);
