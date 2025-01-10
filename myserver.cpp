@@ -1,435 +1,316 @@
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
+// Updated TW-Mailer Server Code
+#include <iostream>
+#include <string>
+#include <cstring>
+#include <thread>
+#include <mutex>
+#include <unordered_map>
+#include <map>
+#include <chrono>
+#include <fstream>
+#include <vector>
 #include <arpa/inet.h>
 #include <unistd.h>
-#include <stdlib.h>
-#include <stdio.h>
-#include <string.h>
+#include <ldap.h>
 #include <signal.h>
-#include <iostream>
-#include <fstream>
+#include <filesystem>
 #include <sstream>
-#include <filesystem> 
-#include <algorithm>  
-#include <vector>
 namespace fs = std::filesystem;
 
 ///////////////////////////////////////////////////////////////////////////////
-
-#define BUF 1024  // Buffer size
-#define PORT 6543 // Port number
-
-///////////////////////////////////////////////////////////////////////////////
-
-int abortRequested = 0; 
-int create_socket = -1; 
-int new_socket = -1;    
+#define BUF 1024
+#define PORT 6543
+#define MAX_LOGIN_ATTEMPTS 3
+#define BLACKLIST_DURATION std::chrono::minutes(1)
 
 ///////////////////////////////////////////////////////////////////////////////
-
-// functions
-void *clientCommunication(void *data);
-void signalHandler(int sig);
+std::mutex session_mutex;
+std::unordered_map<std::string, std::chrono::time_point<std::chrono::system_clock>> blacklist;
+std::unordered_map<int, std::string> active_sessions; // Maps socket to username
+std::map<std::string, std::vector<std::string>> mail_spool; // Maps username to their emails
+std::mutex mail_mutex; // Mutex for mail operations
 
 ///////////////////////////////////////////////////////////////////////////////
+// LDAP Configuration
+const char *ldapUri = "ldap://ldap.technikum-wien.at:389";
+const int ldapVersion = LDAP_VERSION3;
+const char *ldapBase = "dc=technikum-wien,dc=at";
 
-int main(void)
+///////////////////////////////////////////////////////////////////////////////
+bool ldap_authenticate(const std::string &username, const std::string &password)
 {
-    socklen_t addrlen;
-    struct sockaddr_in address, cliaddress;
-    int reuseValue = 1;
-
-    ////////////////////////////////////////////////////////////////////////////
-    // SET UP SIGNAL HANDLER
-    if (signal(SIGINT, signalHandler) == SIG_ERR)
+    LDAP *ldapHandle;
+    int rc = ldap_initialize(&ldapHandle, ldapUri);
+    if (rc != LDAP_SUCCESS)
     {
-        perror("Failed to register signal handler");
-        return EXIT_FAILURE;
+        std::cerr << "LDAP initialization failed: " << ldap_err2string(rc) << std::endl;
+        return false;
     }
 
-    ////////////////////////////////////////////////////////////////////////////
-    // CREATE A SOCKET
-    if ((create_socket = socket(AF_INET, SOCK_STREAM, 0)) == -1)
+    ldap_set_option(ldapHandle, LDAP_OPT_PROTOCOL_VERSION, &ldapVersion);
+
+    char ldapBindUser[256];
+    sprintf(ldapBindUser, "uid=%s,ou=people,%s", username.c_str(), ldapBase);
+
+    BerValue credentials;
+    credentials.bv_val = const_cast<char *>(password.c_str());
+    credentials.bv_len = password.length();
+
+    BerValue *servercredp;
+    rc = ldap_sasl_bind_s(ldapHandle, ldapBindUser, LDAP_SASL_SIMPLE, &credentials, nullptr, nullptr, &servercredp);
+
+    if (rc != LDAP_SUCCESS)
     {
-        perror("Failed to create socket");
-        return EXIT_FAILURE;
+        std::cerr << "LDAP bind failed: " << ldap_err2string(rc) << std::endl;
+        ldap_unbind_ext_s(ldapHandle, nullptr, nullptr);
+        return false;
     }
 
-    ////////////////////////////////////////////////////////////////////////////
-    // SET SOCKET OPTIONS
-    if (setsockopt(create_socket, SOL_SOCKET, SO_REUSEADDR, &reuseValue, sizeof(reuseValue)) == -1)
-    {
-        perror("Failed to set socket options - SO_REUSEADDR");
-        return EXIT_FAILURE;
-    }
-
-    if (setsockopt(create_socket, SOL_SOCKET, SO_REUSEPORT, &reuseValue, sizeof(reuseValue)) == -1)
-    {
-        perror("Failed to set socket options - SO_REUSEPORT");
-        return EXIT_FAILURE;
-    }
-
-    ////////////////////////////////////////////////////////////////////////////
-    // INITIALIZE SERVER ADDRESS
-    memset(&address, 0, sizeof(address));
-    address.sin_family = AF_INET;         
-    address.sin_addr.s_addr = INADDR_ANY; 
-    address.sin_port = htons(PORT);       
-
-    ////////////////////////////////////////////////////////////////////////////
-    // BIND SOCKET TO AN ADDRESS
-    if (bind(create_socket, (struct sockaddr *)&address, sizeof(address)) == -1)
-    {
-        perror("Failed to bind socket");
-        return EXIT_FAILURE;
-    }
-
-    ////////////////////////////////////////////////////////////////////////////
-    // START LISTENING FOR CONNECTIONS
-    if (listen(create_socket, 5) == -1) 
-    {
-        perror("Failed to listen on socket");
-        return EXIT_FAILURE;
-    }
-
-    // main server loop
-    while (!abortRequested)
-    {
-        printf("Waiting for connections...\n");
-
-        /////////////////////////////////////////////////////////////////////////
-        // ACCEPT INCOMING CONNECTIONS
-        addrlen = sizeof(struct sockaddr_in);
-        if ((new_socket = accept(create_socket, (struct sockaddr *)&cliaddress, &addrlen)) == -1)
-        {
-            if (abortRequested)
-            {
-                perror("Accept error after shutdown request");
-            }
-            else
-            {
-                perror("Accept error");
-            }
-            break;
-        }
-
-        /////////////////////////////////////////////////////////////////////////
-        // HANDLE CLIENT COMMUNICATION
-        printf("Client connected from %s:%d...\n",
-               inet_ntoa(cliaddress.sin_addr),
-               ntohs(cliaddress.sin_port));
-        clientCommunication(&new_socket);
-        new_socket = -1;
-    }
-
-    // close server socket
-    if (create_socket != -1)
-    {
-        if (shutdown(create_socket, SHUT_RDWR) == -1)
-        {
-            perror("Failed to shutdown server socket");
-        }
-        if (close(create_socket) == -1)
-        {
-            perror("Failed to close server socket");
-        }
-        create_socket = -1;
-    }
-
-    return EXIT_SUCCESS;
+    ldap_unbind_ext_s(ldapHandle, nullptr, nullptr);
+    return true;
 }
 
-// handle client communication
-void *clientCommunication(void *data)
+///////////////////////////////////////////////////////////////////////////////
+bool check_blacklist(const std::string &ip)
+{
+    std::lock_guard<std::mutex> lock(session_mutex);
+    auto now = std::chrono::system_clock::now();
+    if (blacklist.find(ip) != blacklist.end() && now < blacklist[ip])
+    {
+        return true;
+    }
+    return false;
+}
+
+void blacklist_ip(const std::string &ip)
+{
+    std::lock_guard<std::mutex> lock(session_mutex);
+    blacklist[ip] = std::chrono::system_clock::now() + BLACKLIST_DURATION;
+    std::ofstream blacklist_file("blacklist.txt", std::ios::app);
+    if (blacklist_file.is_open())
+    {
+        blacklist_file << ip << std::endl;
+    }
+}
+
+///////////////////////////////////////////////////////////////////////////////
+void handle_send(int client_socket, const std::string &username, const std::string &command)
+{
+    std::istringstream stream(command);
+    std::string receiver, subject, message, line;
+    std::getline(stream, receiver);
+    std::getline(stream, subject);
+    std::ostringstream message_buffer;
+
+    while (std::getline(stream, line) && line != ".")
+    {
+        message_buffer << line << "\n";
+    }
+
+    message = message_buffer.str();
+
+    std::lock_guard<std::mutex> lock(mail_mutex);
+    mail_spool[receiver].emplace_back("From: " + username + "\nSubject: " + subject + "\n" + message);
+
+    send(client_socket, "OK\n", 3, 0);
+}
+
+void handle_list(int client_socket, const std::string &username)
+{
+    std::lock_guard<std::mutex> lock(mail_mutex);
+    const auto &messages = mail_spool[username];
+
+    std::ostringstream response;
+    response << messages.size() << "\n";
+    for (size_t i = 0; i < messages.size(); ++i)
+    {
+        size_t subject_start = messages[i].find("Subject: ") + 9;
+        size_t subject_end = messages[i].find("\n", subject_start);
+        response << messages[i].substr(subject_start, subject_end - subject_start) << "\n";
+    }
+
+    send(client_socket, response.str().c_str(), response.str().size(), 0);
+}
+
+void handle_read(int client_socket, const std::string &username, int message_number)
+{
+    std::lock_guard<std::mutex> lock(mail_mutex);
+    const auto &messages = mail_spool[username];
+
+    if (message_number < 1 || message_number > static_cast<int>(messages.size()))
+    {
+        send(client_socket, "ERR\n", 4, 0);
+        return;
+    }
+
+    send(client_socket, ("OK\n" + messages[message_number - 1]).c_str(), messages[message_number - 1].size() + 3, 0);
+}
+
+void handle_del(int client_socket, const std::string &username, int message_number)
+{
+    std::lock_guard<std::mutex> lock(mail_mutex);
+    auto &messages = mail_spool[username];
+
+    if (message_number < 1 || message_number > static_cast<int>(messages.size()))
+    {
+        send(client_socket, "ERR\n", 4, 0);
+        return;
+    }
+
+    messages.erase(messages.begin() + message_number - 1);
+    send(client_socket, "OK\n", 3, 0);
+}
+
+///////////////////////////////////////////////////////////////////////////////
+void handle_client(int client_socket, const std::string &client_ip)
 {
     char buffer[BUF];
-    int size;
-    int *current_socket = (int *)data;
+    int login_attempts = 0;
+    bool authenticated = false;
+    std::string username;
 
-    strcpy(buffer, "Welcome!\r\n");
-    if (send(*current_socket, buffer, strlen(buffer), 0) == -1)
+    send(client_socket, "Welcome! Please LOGIN to proceed.\n", 36, 0);
+
+    while (true)
     {
-        perror("Failed to send welcome message");
-        return NULL;
-    }
-
-    // communication loop
-    do
-    {
-        size = recv(*current_socket, buffer, BUF - 1, 0); // data from client
-        if (size == -1)
+        memset(buffer, 0, BUF);
+        int size = recv(client_socket, buffer, BUF - 1, 0);
+        if (size <= 0)
         {
-            if (abortRequested)
+            close(client_socket);
+            return;
+        }
+
+        std::string command(buffer);
+        command.erase(command.find_last_not_of(" \n\r") + 1);
+
+        if (command.rfind("LOGIN", 0) == 0)
+        {
+            if (authenticated)
             {
-                perror("Receive error after shutdown request");
+                send(client_socket, "Already logged in.\n", 20, 0);
+                continue;
+            }
+
+            size_t first_space = command.find(' ');
+            size_t second_space = command.find(' ', first_space + 1);
+            if (first_space == std::string::npos || second_space == std::string::npos)
+            {
+                send(client_socket, "ERR Invalid LOGIN format.\n", 27, 0);
+                continue;
+            }
+
+            username = command.substr(first_space + 1, second_space - first_space - 1);
+            std::string password = command.substr(second_space + 1);
+
+            if (ldap_authenticate(username, password))
+            {
+                std::lock_guard<std::mutex> lock(session_mutex);
+                active_sessions[client_socket] = username;
+                authenticated = true;
+                send(client_socket, "OK\n", 3, 0);
             }
             else
             {
-                perror("Receive error");
+                login_attempts++;
+                if (login_attempts >= MAX_LOGIN_ATTEMPTS)
+                {
+                    blacklist_ip(client_ip);
+                    send(client_socket, "ERR Blacklisted.\n", 17, 0);
+                    close(client_socket);
+                    return;
+                }
+                else
+                {
+                    send(client_socket, "ERR Invalid credentials.\n", 26, 0);
+                }
             }
-            break;
         }
-
-        if (size == 0) // client closed the connection
+        else if (command == "QUIT")
         {
-            printf("Client closed remote socket\n");
-            break;
+            close(client_socket);
+            return;
         }
-
-        buffer[size] = '\0'; 
-        std::string message(buffer);
-
-        // process SEND
-        if (message.rfind("SEND", 0) == 0)
+        else if (!authenticated)
         {
-            std::istringstream stream(message);
-            std::string command, sender, receiver, subject, msgBody, line;
-
-            std::getline(stream, command);  
-            std::getline(stream, sender);   
-            std::getline(stream, receiver); 
-            std::getline(stream, subject);  
-
-            while (std::getline(stream, line) && line != ".")
-            {
-                msgBody += line + "\n";
-            }
-
-            // create mails folder if not already created
-            fs::path receiverFolder = "mails/" + receiver;
-            if (!fs::exists(receiverFolder))
-            {
-                fs::create_directories(receiverFolder);
-            }
-
-            // save the mail
-            int mailCount = std::distance(fs::directory_iterator(receiverFolder), fs::directory_iterator{});
-            fs::path mailFile = receiverFolder / (std::to_string(mailCount + 1) + "mail.txt");
-
-            std::ofstream outFile(mailFile);
-            if (outFile.is_open())
-            {
-                outFile << "Sender: " << sender << "\n";
-                outFile << "Receiver: " << receiver << "\n";
-                outFile << "Subject: " << subject << "\n\n";
-                outFile << msgBody;
-                outFile.close();
-
-                if (send(*current_socket, "OK\r\n", 4, 0) == -1)
-                {
-                    perror("Failed to send confirmation");
-                    return NULL;
-                }
-            }
-            else
-            {
-                std::cerr << "Error opening file: " << mailFile << std::endl;
-            }
+            send(client_socket, "ERR Please LOGIN first.\n", 25, 0);
         }
-        // process LIST 
-        else if (message.rfind("LIST", 0) == 0)
+        else if (command.rfind("SEND", 0) == 0)
         {
-            std::istringstream stream(message);
-            std::string command, username;
-            std::getline(stream, command);  
-            std::getline(stream, username); 
-
-            fs::path userFolder = "mails/" + username;
-            std::ostringstream response;
-            std::vector<fs::path> files;
-            std::ostringstream subjects;
-
-            if (!fs::exists(userFolder) || fs::is_empty(userFolder))
-            {
-                response << "Count of messages of user: 0 or user unknown\n";
-            }
-            else
-            {
-                int messageCount = 0;
-
-                for (const auto &entry : fs::directory_iterator(userFolder))
-                {
-                    if (entry.is_regular_file())
-                    {
-                        files.push_back(entry.path());
-                    }
-                }
-
-                std::sort(files.begin(), files.end());
-
-                for (const auto &file : files)
-                {
-                    std::ifstream mailFile(file);
-                    if (!mailFile.is_open())
-                    {
-                        std::cerr << "Error opening file: " << file << std::endl;
-                        continue;
-                    }
-
-                    std::string line;
-                    while (std::getline(mailFile, line))
-                    {
-                        if (line.rfind("Subject: ", 0) == 0)
-                        {
-                            subjects << line.substr(9) << "\n";
-                            break;
-                        }
-                    }
-                    mailFile.close();
-                    ++messageCount;
-                }
-
-                response << "Count of messages of user: " << messageCount << "\n";
-                response << subjects.str();
-            }
-
-            // send response to client
-            if (send(*current_socket, response.str().c_str(), response.str().size(), 0) == -1)
-            {
-                perror("Failed to send LIST response");
-                return NULL;
-            }
+            handle_send(client_socket, username, command.substr(5));
         }
-        // process READ 
-        else if (message.rfind("READ", 0) == 0)
+        else if (command == "LIST")
         {
-            std::istringstream stream(message);
-            std::string command, username, messageNumber;
-            std::getline(stream, command);       
-            std::getline(stream, username);     
-            std::getline(stream, messageNumber); 
-
-            fs::path messageFile = "mails/" + username + "/" + messageNumber + "mail.txt";
-
-            if (!fs::exists(messageFile))
-            {
-                if (send(*current_socket, "ERR\n", 4, 0) == -1)
-                {
-                    perror("Failed to send ERR response for READ");
-                }
-                return NULL;
-            }
-
-            std::ifstream mailFile(messageFile);
-            if (!mailFile.is_open())
-            {
-                if (send(*current_socket, "ERR\n", 4, 0) == -1)
-                {
-                    perror("Failed to send ERR response for READ");
-                }
-                return NULL;
-            }
-
-            std::ostringstream fullMessage;
-            std::string line;
-            while (std::getline(mailFile, line))
-            {
-                fullMessage << line << "\n";
-            }
-            mailFile.close();
-
-            std::string response = "OK\n" + fullMessage.str();
-            if (send(*current_socket, response.c_str(), response.size(), 0) == -1)
-            {
-                perror("Failed to send READ response");
-                return NULL;
-            }
+            handle_list(client_socket, username);
         }
-        // process DEL 
-        else if (message.rfind("DEL", 0) == 0)
+        else if (command.rfind("READ", 0) == 0)
         {
-            std::istringstream stream(message);
-            std::string command, username, messageNumber;
-            std::getline(stream, command);       
-            std::getline(stream, username);      
-            std::getline(stream, messageNumber); 
-
-            fs::path messageFile = "mails/" + username + "/" + messageNumber + "mail.txt";
-
-            if (fs::exists(messageFile))
-            {
-                fs::remove(messageFile);
-
-                if (send(*current_socket, "OK\n", 3, 0) == -1)
-                {
-                    perror("Failed to send OK response for DEL");
-                }
-            }
-            else
-            {
-                if (send(*current_socket, "ERR\n", 4, 0) == -1)
-                {
-                    perror("Failed to send ERR response for DEL");
-                }
-            }
+            int message_number = std::stoi(command.substr(5));
+            handle_read(client_socket, username, message_number);
         }
-        // handle unknown commands
+        else if (command.rfind("DEL", 0) == 0)
+        {
+            int message_number = std::stoi(command.substr(4));
+            handle_del(client_socket, username, message_number);
+        }
         else
         {
-            if (send(*current_socket, "ERR\n", 4, 0) == -1)
-            {
-                perror("Failed to send ERR for unknown command");
-            }
+            send(client_socket, "ERR Unknown command.\n", 22, 0);
         }
-
-    } while (strcmp(buffer, "QUIT") != 0 && !abortRequested);
-
-    // close client socket
-    if (*current_socket != -1)
-    {
-        if (shutdown(*current_socket, SHUT_RDWR) == -1)
-        {
-            perror("Failed to shutdown client socket");
-        }
-        if (close(*current_socket) == -1)
-        {
-            perror("Failed to close client socket");
-        }
-        *current_socket = -1;
     }
-
-    return NULL;
 }
 
-// signal handler to clean up sockets on shutdown
-void signalHandler(int sig)
+///////////////////////////////////////////////////////////////////////////////
+int main()
 {
-    if (sig == SIGINT)
-    {
-        printf("Abort requested... ");
-        abortRequested = 1;
+    struct sockaddr_in server_addr, client_addr;
+    socklen_t client_len = sizeof(client_addr);
 
-        // close client socket if open
-        if (new_socket != -1)
+    int server_socket = socket(AF_INET, SOCK_STREAM, 0);
+    if (server_socket < 0)
+    {
+        perror("Socket creation failed");
+        return EXIT_FAILURE;
+    }
+
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_addr.s_addr = INADDR_ANY;
+    server_addr.sin_port = htons(PORT);
+
+    if (bind(server_socket, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0)
+    {
+        perror("Bind failed");
+        return EXIT_FAILURE;
+    }
+
+    if (listen(server_socket, 10) < 0)
+    {
+        perror("Listen failed");
+        return EXIT_FAILURE;
+    }
+
+    std::cout << "Server running on port " << PORT << std::endl;
+
+    while (true)
+    {
+        int client_socket = accept(server_socket, (struct sockaddr *)&client_addr, &client_len);
+        if (client_socket < 0)
         {
-            if (shutdown(new_socket, SHUT_RDWR) == -1)
-            {
-                perror("Failed to shutdown client socket");
-            }
-            if (close(new_socket) == -1)
-            {
-                perror("Failed to close client socket");
-            }
-            new_socket = -1;
+            perror("Accept failed");
+            continue;
         }
 
-        // close server socket if open
-        if (create_socket != -1)
+        std::string client_ip = inet_ntoa(client_addr.sin_addr);
+        if (check_blacklist(client_ip))
         {
-            if (shutdown(create_socket, SHUT_RDWR) == -1)
-            {
-                perror("Failed to shutdown server socket");
-            }
-            if (close(create_socket) == -1)
-            {
-                perror("Failed to close server socket");
-            }
-            create_socket = -1;
+            send(client_socket, "ERR Blacklisted.\n", 17, 0);
+            close(client_socket);
+            continue;
         }
+
+        std::thread(handle_client, client_socket, client_ip).detach();
     }
-    else
-    {
-        exit(sig);
-    }
+
+    close(server_socket);
+    return EXIT_SUCCESS;
 }
