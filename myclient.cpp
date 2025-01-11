@@ -30,6 +30,15 @@ bool checkSubjectLength(const std::string &subject) {
     return subject.length() <= 80;
 }
 
+void display_commands() {
+    std::cout << "\nChoose your command:" << std::endl;
+    std::cout << "SEND" << std::endl;
+    std::cout << "LIST" << std::endl;
+    std::cout << "READ" << std::endl;
+    std::cout << "DEL" << std::endl;
+    std::cout << "QUIT" << std::endl;
+}
+
 void login(int create_socket) {
     std::string username, password;
 
@@ -67,6 +76,7 @@ void login(int create_socket) {
             std::string response(recv_buffer);
             if (response.find("OK") != std::string::npos) {
                 std::cout << "Login successful." << std::endl;
+                display_commands();  // Display available commands after login
                 return;
             } else if (response.find("ERR Blacklisted") != std::string::npos) {
                 std::cerr << "You have been blacklisted. Please try again later." << std::endl;
@@ -81,14 +91,6 @@ void login(int create_socket) {
     }
 }
 
-void display_commands() {
-    std::cout << "\nChoose your command:" << std::endl;
-    std::cout << "SEND" << std::endl;
-    std::cout << "LIST" << std::endl;
-    std::cout << "READ" << std::endl;
-    std::cout << "DEL" << std::endl;
-    std::cout << "QUIT" << std::endl;
-}
 
 //Sender excluded, bc login logic implemented
 void send_mails(int create_socket, const std::string &receiver, const std::string &subject, const std::string &message) {
@@ -185,12 +187,12 @@ void delete_mails(int create_socket, const std::string &message_number) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-
 int main(int argc, char **argv) {
     int create_socket;
     char buffer[BUF];
     struct sockaddr_in address;
     bool isQuit = false;
+    bool isLoggedIn = false; // Track if the user has logged in
 
     if ((create_socket = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
         perror("Socket error");
@@ -224,16 +226,21 @@ int main(int argc, char **argv) {
         std::cout << buffer;
     }
 
-    login(create_socket);
-
     do {
-        display_commands();
-        std::cout << ">> ";
+        std::cout << ">> ";        
         if (std::cin.getline(buffer, BUF)) {
             std::string command(buffer);
 
+            if (!isLoggedIn && command != "LOGIN") {
+                std::cerr << "You must LOGIN first.\n";
+                continue;
+            }
+
             if (command == "QUIT") {
                 isQuit = true;
+            } else if (command == "LOGIN") {
+                login(create_socket);
+                isLoggedIn = true; // Mark as logged in after successful login
             } else if (command == "SEND") {
                 std::string receiver, subject, message, line;
 

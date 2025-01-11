@@ -237,8 +237,7 @@ void handle_del(int client_socket, const std::string &username, int message_numb
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-void handle_client(int client_socket, const std::string &client_ip)
-{
+void handle_client(int client_socket, const std::string &client_ip) {
     char buffer[BUF];
     int login_attempts = 0;
     bool authenticated = false;
@@ -246,12 +245,10 @@ void handle_client(int client_socket, const std::string &client_ip)
 
     send(client_socket, "Welcome! Please LOGIN to proceed.\n", 36, 0);
 
-    while (true)
-    {
+    while (true) {
         memset(buffer, 0, BUF);
         int size = recv(client_socket, buffer, BUF - 1, 0);
-        if (size <= 0)
-        {
+        if (size <= 0) {
             close(client_socket);
             return;
         }
@@ -259,76 +256,59 @@ void handle_client(int client_socket, const std::string &client_ip)
         std::string command(buffer);
         command.erase(command.find_last_not_of(" \n\r") + 1);
 
-        if (command.rfind("LOGIN", 0) == 0)
-        {
-            if (authenticated)
-            {
-                send(client_socket, "Already logged in.\n", 20, 0);
-                continue;
-            }
-
-            size_t first_space = command.find(' ');
-            size_t second_space = command.find(' ', first_space + 1);
-            if (first_space == std::string::npos || second_space == std::string::npos)
-            {
-                send(client_socket, "ERR Invalid LOGIN format.\n", 27, 0);
-                continue;
-            }
-
-            username = command.substr(first_space + 1, second_space - first_space - 1);
-            std::string password = command.substr(second_space + 1);
-
-            if (ldap_authenticate(username, password))
-            {
-                std::lock_guard<std::mutex> lock(session_mutex);
-                active_sessions[client_socket] = username;
-                authenticated = true;
-                send(client_socket, "OK\n", 3, 0);
-            }
-            else
-            {
-                login_attempts++;
-                if (login_attempts >= MAX_LOGIN_ATTEMPTS)
-                {
-                    blacklist_ip(client_ip);
-                    send(client_socket, "ERR Blacklisted.\n", 17, 0);
-                    break; 
+        // If client is not authenticated, only accept LOGIN or QUIT commands
+        if (!authenticated) {
+            if (command.rfind("LOGIN", 0) == 0) {
+                size_t first_space = command.find(' ');
+                size_t second_space = command.find(' ', first_space + 1);
+                if (first_space == std::string::npos || second_space == std::string::npos) {
+                    send(client_socket, "ERR Invalid LOGIN format.\n", 27, 0);
+                    continue;
                 }
-                else
-                {
-                    send(client_socket, "ERR Invalid credentials.\n", 26, 0);
+
+                username = command.substr(first_space + 1, second_space - first_space - 1);
+                std::string password = command.substr(second_space + 1);
+
+                if (ldap_authenticate(username, password)) {
+                    std::lock_guard<std::mutex> lock(session_mutex);
+                    active_sessions[client_socket] = username;
+                    authenticated = true;
+                    send(client_socket, "OK\n", 3, 0);
+                } else {
+                    login_attempts++;
+                    if (login_attempts >= MAX_LOGIN_ATTEMPTS) {
+                        blacklist_ip(client_ip);
+                        send(client_socket, "ERR Blacklisted.\n", 17, 0);
+                        close(client_socket);
+                        return;
+                    } else {
+                        send(client_socket, "ERR Invalid credentials.\n", 26, 0);
+                    }
                 }
+            } else if (command == "QUIT") {
+                close(client_socket);
+                return;
+            } else {
+                send(client_socket, "ERR Please LOGIN first.\n", 25, 0);
             }
+            continue;
         }
-        else if (command == "QUIT")
-        {
-            close(client_socket);
-            return;
-        }
-        else if (!authenticated)
-        {
-            send(client_socket, "ERR Please LOGIN first.\n", 25, 0);
-        }
-        else if (command.rfind("SEND", 0) == 0)
-        {
+
+        // Process commands for authenticated users
+        if (command.rfind("SEND", 0) == 0) {
             handle_send(client_socket, username, command.substr(5));
-        }
-        else if (command == "LIST")
-        {
+        } else if (command == "LIST") {
             handle_list(client_socket, username);
-        }
-        else if (command.rfind("READ", 0) == 0)
-        {
+        } else if (command.rfind("READ", 0) == 0) {
             int message_number = std::stoi(command.substr(5));
             handle_read(client_socket, username, message_number);
-        }
-        else if (command.rfind("DEL", 0) == 0)
-        {
+        } else if (command.rfind("DEL", 0) == 0) {
             int message_number = std::stoi(command.substr(4));
             handle_del(client_socket, username, message_number);
-        }
-        else
-        {
+        } else if (command == "QUIT") {
+            close(client_socket);
+            return;
+        } else {
             send(client_socket, "ERR Unknown command.\n", 22, 0);
         }
     }
