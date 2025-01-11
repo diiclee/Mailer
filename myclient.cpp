@@ -3,6 +3,8 @@
 #include <cstring>
 #include <unistd.h>
 #include <arpa/inet.h>
+#include <chrono>
+#include <thread>
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -28,6 +30,66 @@ bool checkSubjectLength(const std::string &subject) {
     return subject.length() <= 80;
 }
 
+void login(int create_socket) {
+    std::string username, password;
+
+    while (true) {
+        while (true) {
+            std::cout << "Username: ";
+            std::getline(std::cin, username);
+            if (checkUsernameLength(username))
+                break;
+            std::cout << "Username too long or contains invalid characters! Must be less than 8 alphanumeric characters." << std::endl;
+        }
+
+        std::cout << "Password: ";
+        std::getline(std::cin, password);
+
+        // Format LOGIN command
+        std::string buffer = "LOGIN " + username + " " + password + "\n";
+
+        // Send LOGIN request
+        if (send(create_socket, buffer.c_str(), buffer.size(), 0) == -1) {
+            perror("Error while sending the LOGIN request");
+            return;
+        }
+
+        // Read server response
+        char recv_buffer[BUF];
+        int size = recv(create_socket, recv_buffer, BUF - 1, 0);
+        if (size == -1) {
+            perror("Error while receiving the server response");
+        } else if (size == 0) {
+            std::cout << "Server closed the connection." << std::endl;
+            exit(EXIT_FAILURE);
+        } else {
+            recv_buffer[size] = '\0';
+            std::string response(recv_buffer);
+            if (response.find("OK") != std::string::npos) {
+                std::cout << "Login successful." << std::endl;
+                return;
+            } else if (response.find("ERR Blacklisted") != std::string::npos) {
+                std::cerr << "You have been blacklisted. Please try again later." << std::endl;
+                exit(EXIT_FAILURE);
+            } else if (response.find("ERR Invalid credentials") != std::string::npos) {
+                std::cerr << "Invalid credentials. Try again." << std::endl;
+            } else {
+                std::cerr << "Login failed: " << response << std::endl;
+                exit(EXIT_FAILURE);
+            }
+        }
+    }
+}
+
+void display_commands() {
+    std::cout << "\nChoose your command:" << std::endl;
+    std::cout << "SEND" << std::endl;
+    std::cout << "LIST" << std::endl;
+    std::cout << "READ" << std::endl;
+    std::cout << "DEL" << std::endl;
+    std::cout << "QUIT" << std::endl;
+}
+
 //Sender excluded, bc login logic implemented
 void send_mails(int create_socket, const std::string &receiver, const std::string &subject, const std::string &message) {
     std::string buffer;
@@ -44,16 +106,11 @@ void send_mails(int create_socket, const std::string &receiver, const std::strin
     // Read server response
     char recv_buffer[BUF];
     int size = recv(create_socket, recv_buffer, BUF - 1, 0);
-    if (size == -1) 
-    {
+    if (size == -1) {
         perror("Error while receiving the server response");
-    } 
-    else if (size == 0) 
-    {
+    } else if (size == 0) {
         std::cout << "Server closed the connection." << std::endl;
-    } 
-    else 
-    {
+    } else {
         recv_buffer[size] = '\0';
         std::cout << "Server: " << recv_buffer << std::endl;
     }
@@ -64,8 +121,7 @@ void list_mails(int create_socket) {
     std::string buffer = "LIST\n";
 
     // Send LIST request
-    if (send(create_socket, buffer.c_str(), buffer.size(), 0) == -1) 
-    {
+    if (send(create_socket, buffer.c_str(), buffer.size(), 0) == -1) {
         perror("Error while sending the LIST request");
         return;
     }
@@ -73,16 +129,11 @@ void list_mails(int create_socket) {
     // Read server response
     char recv_buffer[BUF];
     int size = recv(create_socket, recv_buffer, BUF - 1, 0);
-    if (size == -1) 
-    {
+    if (size == -1) {
         perror("Error while receiving the server response");
-    } 
-    else if (size == 0) 
-    {
+    } else if (size == 0) {
         std::cout << "Server closed the connection." << std::endl;
-    } 
-    else 
-    {
+    } else {
         recv_buffer[size] = '\0';
         std::cout << "<< " << recv_buffer << std::endl;
     }
@@ -93,8 +144,7 @@ void read_mails(int create_socket, const std::string &message_number) {
     std::string buffer = "READ\n" + message_number + "\n";
 
     // Send READ request
-    if (send(create_socket, buffer.c_str(), buffer.size(), 0) == -1) 
-    {
+    if (send(create_socket, buffer.c_str(), buffer.size(), 0) == -1) {
         perror("Error while sending the READ request");
         return;
     }
@@ -102,16 +152,11 @@ void read_mails(int create_socket, const std::string &message_number) {
     // Read server response
     char recv_buffer[BUF];
     int size = recv(create_socket, recv_buffer, BUF - 1, 0);
-    if (size == -1) 
-    {
+    if (size == -1) {
         perror("Error while receiving the server response");
-    } 
-    else if (size == 0) 
-    {
+    } else if (size == 0) {
         std::cout << "Server closed the connection." << std::endl;
-    } 
-    else 
-    {
+    } else {
         recv_buffer[size] = '\0';
         std::cout << "<< " << recv_buffer << std::endl;
     }
@@ -121,8 +166,7 @@ void delete_mails(int create_socket, const std::string &message_number) {
     std::string buffer = "DEL\n" + message_number + "\n";
 
     // Send DEL request
-    if (send(create_socket, buffer.c_str(), buffer.size(), 0) == -1) 
-    {
+    if (send(create_socket, buffer.c_str(), buffer.size(), 0) == -1) {
         perror("Error while sending the DELETE request");
         return;
     }
@@ -130,77 +174,14 @@ void delete_mails(int create_socket, const std::string &message_number) {
     // Read server response
     char recv_buffer[BUF];
     int size = recv(create_socket, recv_buffer, BUF - 1, 0);
-    if (size == -1) 
-    {
+    if (size == -1) {
         perror("Error while receiving the server response");
-    } 
-    else if (size == 0) 
-    {
+    } else if (size == 0) {
         std::cout << "Server closed the connection." << std::endl;
-    } 
-    else 
-    {
+    } else {
         recv_buffer[size] = '\0';
         std::cout << "<< " << recv_buffer << std::endl;
     }
-}
-
-
-void login(int create_socket) {
-    std::string username, password;
-
-    while (true) {
-        std::cout << "Username: ";
-        std::getline(std::cin, username);
-        if (checkUsernameLength(username))
-            break;
-        std::cout << "Username too long or contains invalid characters! Must be less than 8 alphanumeric characters." << std::endl;
-    }
-
-    std::cout << "Password: ";
-    std::getline(std::cin, password);
-
-    // Format LOGIN command
-    std::string buffer = "LOGIN " + username + " " + password + "\n";
-
-    // Send LOGIN request
-    if (send(create_socket, buffer.c_str(), buffer.size(), 0) == -1) 
-    {
-        perror("Error while sending the LOGIN request");
-        return;
-    }
-
-    // Read server response
-    char recv_buffer[BUF];
-    int size = recv(create_socket, recv_buffer, BUF - 1, 0);
-    if (size == -1) 
-    {
-        perror("Error while receiving the server response");
-    } else if (size == 0) 
-    {
-        std::cout << "Server closed the connection." << std::endl;
-    } 
-    else 
-    {
-        recv_buffer[size] = '\0';
-        if (std::string(recv_buffer).find("OK") != std::string::npos) 
-        {
-            std::cout << "Login successful." << std::endl;
-        } else 
-        {
-            std::cerr << "Login failed: " << recv_buffer << std::endl;
-            exit(EXIT_FAILURE);
-        }
-    }
-}
-
-void display_commands() {
-    std::cout << "\nChoose your command:" << std::endl;
-    std::cout << "SEND" << std::endl;
-    std::cout << "LIST" << std::endl;
-    std::cout << "READ" << std::endl;
-    std::cout << "DEL" << std::endl;
-    std::cout << "QUIT" << std::endl;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -254,30 +235,30 @@ int main(int argc, char **argv) {
             if (command == "QUIT") {
                 isQuit = true;
             } else if (command == "SEND") {
-            std::string receiver, subject, message, line;
+                std::string receiver, subject, message, line;
 
-            while (true) {
-                std::cout << "Receiver: ";
-                std::getline(std::cin, receiver);
-                if (checkUsernameLength(receiver))
-                    break;
-                std::cout << "Invalid receiver username!" << std::endl;
-            }
+                while (true) {
+                    std::cout << "Receiver: ";
+                    std::getline(std::cin, receiver);
+                    if (checkUsernameLength(receiver))
+                        break;
+                    std::cout << "Invalid receiver username!" << std::endl;
+                }
 
-            while (true) {
-                std::cout << "Subject: ";
-                std::getline(std::cin, subject);
-                if (checkSubjectLength(subject))
-                    break;
-                std::cout << "Subject too long. Must be less than 80 characters." << std::endl;
-            }
+                while (true) {
+                    std::cout << "Subject: ";
+                    std::getline(std::cin, subject);
+                    if (checkSubjectLength(subject))
+                        break;
+                    std::cout << "Subject too long. Must be less than 80 characters." << std::endl;
+                }
 
-            std::cout << "Message (multi-line, end with '.'): \n";
-            while (std::getline(std::cin, line) && line != ".") {
-                message += line + "\n";
-            }
+                std::cout << "Message (multi-line, end with '.'): \n";
+                while (std::getline(std::cin, line) && line != ".") {
+                    message += line + "\n";
+                }
 
-            send_mails(create_socket, receiver, subject, message);
+                send_mails(create_socket, receiver, subject, message);
 
             } else if (command == "LIST") {
                 list_mails(create_socket);

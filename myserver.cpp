@@ -70,26 +70,57 @@ bool ldap_authenticate(const std::string &username, const std::string &password)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-bool check_blacklist(const std::string &ip)
-{
+// Blacklist persistence file
+const std::string blacklistFile = "blacklist.txt";
+
+// Load the blacklist from file
+void load_blacklist() {
+    std::ifstream file(blacklistFile);
+    if (file.is_open()) {
+        std::string ip;
+        long long expiry_time;
+        while (file >> ip >> expiry_time) {
+            blacklist[ip] = std::chrono::system_clock::time_point(std::chrono::milliseconds(expiry_time));
+        }
+        file.close();
+    }
+}
+
+// Save the blacklist to file
+void save_blacklist() {
+    std::ofstream file(blacklistFile, std::ios::trunc);
+    if (file.is_open()) {
+        for (const auto& entry : blacklist) {
+            auto expiry_time = std::chrono::duration_cast<std::chrono::milliseconds>(entry.second.time_since_epoch()).count();
+            file << entry.first << " " << expiry_time << std::endl;
+        }
+        file.close();
+    }
+}
+
+// Check if an IP is blacklisted
+bool check_blacklist(const std::string &ip) {
     std::lock_guard<std::mutex> lock(session_mutex);
     auto now = std::chrono::system_clock::now();
-    if (blacklist.find(ip) != blacklist.end() && now < blacklist[ip])
-    {
-        return true;
+    if (blacklist.find(ip) != blacklist.end()) {
+        if (now < blacklist[ip]) {
+            std::cerr << "IP " << ip << " is blacklisted.\n";
+            return true; // IP is still blacklisted
+        } else {
+            blacklist.erase(ip); // Remove expired entry
+            save_blacklist();
+        }
     }
     return false;
 }
 
-void blacklist_ip(const std::string &ip)
-{
+// Add an IP to the blacklist
+void blacklist_ip(const std::string &ip) {
     std::lock_guard<std::mutex> lock(session_mutex);
-    blacklist[ip] = std::chrono::system_clock::now() + BLACKLIST_DURATION;
-    std::ofstream blacklist_file("blacklist.txt", std::ios::app);
-    if (blacklist_file.is_open())
-    {
-        blacklist_file << ip << std::endl;
-    }
+    auto expiry_time = std::chrono::system_clock::now() + BLACKLIST_DURATION;
+    blacklist[ip] = expiry_time;
+    save_blacklist();
+    std::cerr << "Blacklisted IP: " << ip << " for " << std::chrono::duration_cast<std::chrono::seconds>(BLACKLIST_DURATION).count() << " seconds.\n";
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -261,8 +292,7 @@ void handle_client(int client_socket, const std::string &client_ip)
                 {
                     blacklist_ip(client_ip);
                     send(client_socket, "ERR Blacklisted.\n", 17, 0);
-                    close(client_socket);
-                    return;
+                    break; 
                 }
                 else
                 {
@@ -315,6 +345,8 @@ int main(int argc, char **argv)
 
     int port = std::stoi(argv[1]);
     mailFolder = argv[2];
+
+    load_blacklist();
 
     if (!fs::exists(mailFolder))
     {
@@ -369,6 +401,7 @@ int main(int argc, char **argv)
         std::thread(handle_client, client_socket, client_ip).detach();
     }
 
+    save_blacklist();
     close(server_socket);
     return EXIT_SUCCESS;
 }
