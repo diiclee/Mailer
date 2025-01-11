@@ -28,6 +28,7 @@ bool checkSubjectLength(const std::string &subject) {
     return subject.length() <= 80;
 }
 
+//Sender excluded, bc login logic implemented
 void send_mails(int create_socket, const std::string &receiver, const std::string &subject, const std::string &message) {
     std::string buffer;
 
@@ -43,21 +44,28 @@ void send_mails(int create_socket, const std::string &receiver, const std::strin
     // Read server response
     char recv_buffer[BUF];
     int size = recv(create_socket, recv_buffer, BUF - 1, 0);
-    if (size == -1) {
+    if (size == -1) 
+    {
         perror("Error while receiving the server response");
-    } else if (size == 0) {
+    } 
+    else if (size == 0) 
+    {
         std::cout << "Server closed the connection." << std::endl;
-    } else {
+    } 
+    else 
+    {
         recv_buffer[size] = '\0';
         std::cout << "Server: " << recv_buffer << std::endl;
     }
 }
 
+// username removed due to login implementation
 void list_mails(int create_socket) {
     std::string buffer = "LIST\n";
 
     // Send LIST request
-    if (send(create_socket, buffer.c_str(), buffer.size(), 0) == -1) {
+    if (send(create_socket, buffer.c_str(), buffer.size(), 0) == -1) 
+    {
         perror("Error while sending the LIST request");
         return;
     }
@@ -65,21 +73,28 @@ void list_mails(int create_socket) {
     // Read server response
     char recv_buffer[BUF];
     int size = recv(create_socket, recv_buffer, BUF - 1, 0);
-    if (size == -1) {
+    if (size == -1) 
+    {
         perror("Error while receiving the server response");
-    } else if (size == 0) {
+    } 
+    else if (size == 0) 
+    {
         std::cout << "Server closed the connection." << std::endl;
-    } else {
+    } 
+    else 
+    {
         recv_buffer[size] = '\0';
-        std::cout << "Server: " << recv_buffer << std::endl;
+        std::cout << "<< " << recv_buffer << std::endl;
     }
 }
 
+//username removed
 void read_mails(int create_socket, const std::string &message_number) {
     std::string buffer = "READ\n" + message_number + "\n";
 
     // Send READ request
-    if (send(create_socket, buffer.c_str(), buffer.size(), 0) == -1) {
+    if (send(create_socket, buffer.c_str(), buffer.size(), 0) == -1) 
+    {
         perror("Error while sending the READ request");
         return;
     }
@@ -87,13 +102,18 @@ void read_mails(int create_socket, const std::string &message_number) {
     // Read server response
     char recv_buffer[BUF];
     int size = recv(create_socket, recv_buffer, BUF - 1, 0);
-    if (size == -1) {
+    if (size == -1) 
+    {
         perror("Error while receiving the server response");
-    } else if (size == 0) {
+    } 
+    else if (size == 0) 
+    {
         std::cout << "Server closed the connection." << std::endl;
-    } else {
+    } 
+    else 
+    {
         recv_buffer[size] = '\0';
-        std::cout << "Server: " << recv_buffer << std::endl;
+        std::cout << "<< " << recv_buffer << std::endl;
     }
 }
 
@@ -101,7 +121,8 @@ void delete_mails(int create_socket, const std::string &message_number) {
     std::string buffer = "DEL\n" + message_number + "\n";
 
     // Send DEL request
-    if (send(create_socket, buffer.c_str(), buffer.size(), 0) == -1) {
+    if (send(create_socket, buffer.c_str(), buffer.size(), 0) == -1) 
+    {
         perror("Error while sending the DELETE request");
         return;
     }
@@ -109,13 +130,18 @@ void delete_mails(int create_socket, const std::string &message_number) {
     // Read server response
     char recv_buffer[BUF];
     int size = recv(create_socket, recv_buffer, BUF - 1, 0);
-    if (size == -1) {
+    if (size == -1) 
+    {
         perror("Error while receiving the server response");
-    } else if (size == 0) {
+    } 
+    else if (size == 0) 
+    {
         std::cout << "Server closed the connection." << std::endl;
-    } else {
+    } 
+    else 
+    {
         recv_buffer[size] = '\0';
-        std::cout << "Server: " << recv_buffer << std::endl;
+        std::cout << "<< " << recv_buffer << std::endl;
     }
 }
 
@@ -138,7 +164,8 @@ void login(int create_socket) {
     std::string buffer = "LOGIN " + username + " " + password + "\n";
 
     // Send LOGIN request
-    if (send(create_socket, buffer.c_str(), buffer.size(), 0) == -1) {
+    if (send(create_socket, buffer.c_str(), buffer.size(), 0) == -1) 
+    {
         perror("Error while sending the LOGIN request");
         return;
     }
@@ -146,15 +173,21 @@ void login(int create_socket) {
     // Read server response
     char recv_buffer[BUF];
     int size = recv(create_socket, recv_buffer, BUF - 1, 0);
-    if (size == -1) {
+    if (size == -1) 
+    {
         perror("Error while receiving the server response");
-    } else if (size == 0) {
+    } else if (size == 0) 
+    {
         std::cout << "Server closed the connection." << std::endl;
-    } else {
+    } 
+    else 
+    {
         recv_buffer[size] = '\0';
-        if (std::string(recv_buffer).find("OK") != std::string::npos) {
+        if (std::string(recv_buffer).find("OK") != std::string::npos) 
+        {
             std::cout << "Login successful." << std::endl;
-        } else {
+        } else 
+        {
             std::cerr << "Login failed: " << recv_buffer << std::endl;
             exit(EXIT_FAILURE);
         }
@@ -163,11 +196,11 @@ void login(int create_socket) {
 
 void display_commands() {
     std::cout << "\nChoose your command:" << std::endl;
-    std::cout << "SEND - Send a mail" << std::endl;
-    std::cout << "LIST - List all mails" << std::endl;
-    std::cout << "READ - Read a specific mail" << std::endl;
-    std::cout << "DEL  - Delete a mail" << std::endl;
-    std::cout << "QUIT - Quit the program" << std::endl;
+    std::cout << "SEND" << std::endl;
+    std::cout << "LIST" << std::endl;
+    std::cout << "READ" << std::endl;
+    std::cout << "DEL" << std::endl;
+    std::cout << "QUIT" << std::endl;
 }
 
 ///////////////////////////////////////////////////////////////////////////////

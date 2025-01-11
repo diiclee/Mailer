@@ -1,4 +1,3 @@
-// Updated TW-Mailer Server Code
 #include <iostream>
 #include <string>
 #include <cstring>
@@ -27,8 +26,8 @@ namespace fs = std::filesystem;
 std::mutex session_mutex;
 std::unordered_map<std::string, std::chrono::time_point<std::chrono::system_clock>> blacklist;
 std::unordered_map<int, std::string> active_sessions; // Maps socket to username
-std::map<std::string, std::vector<std::string>> mail_spool; // Maps username to their emails
 std::mutex mail_mutex; // Mutex for mail operations
+std::string mailFolder; // Mail folder path
 
 ///////////////////////////////////////////////////////////////////////////////
 // LDAP Configuration
@@ -97,36 +96,75 @@ void blacklist_ip(const std::string &ip)
 void handle_send(int client_socket, const std::string &username, const std::string &command)
 {
     std::istringstream stream(command);
-    std::string receiver, subject, message, line;
+    std::string receiver, subject, line;
+    std::ostringstream message_buffer;
+
     std::getline(stream, receiver);
     std::getline(stream, subject);
-    std::ostringstream message_buffer;
 
     while (std::getline(stream, line) && line != ".")
     {
         message_buffer << line << "\n";
     }
 
-    message = message_buffer.str();
+    std::string message = message_buffer.str();
 
-    std::lock_guard<std::mutex> lock(mail_mutex);
-    mail_spool[receiver].emplace_back("From: " + username + "\nSubject: " + subject + "\n" + message);
+    // Ensure receiver folder exists
+    fs::path receiverFolder = fs::path(mailFolder) / receiver;
+    if (!fs::exists(receiverFolder))
+    {
+        fs::create_directories(receiverFolder);
+    }
 
-    send(client_socket, "OK\n", 3, 0);
+    // Save message
+    int messageCount = std::distance(fs::directory_iterator(receiverFolder), fs::directory_iterator{});
+    fs::path messageFile = receiverFolder / (std::to_string(messageCount + 1) + ".txt");
+
+    std::ofstream outFile(messageFile);
+    if (outFile.is_open())
+    {
+        outFile << "From: " << username << "\n";
+        outFile << "Subject: " << subject << "\n\n";
+        outFile << message;
+        outFile.close();
+        send(client_socket, "OK\n", 3, 0);
+    }
+    else
+    {
+        send(client_socket, "ERR\n", 4, 0);
+    }
 }
 
 void handle_list(int client_socket, const std::string &username)
 {
-    std::lock_guard<std::mutex> lock(mail_mutex);
-    const auto &messages = mail_spool[username];
-
+    fs::path userFolder = fs::path(mailFolder) / username;
     std::ostringstream response;
-    response << messages.size() << "\n";
-    for (size_t i = 0; i < messages.size(); ++i)
+
+    if (!fs::exists(userFolder) || fs::is_empty(userFolder))
     {
-        size_t subject_start = messages[i].find("Subject: ") + 9;
-        size_t subject_end = messages[i].find("\n", subject_start);
-        response << messages[i].substr(subject_start, subject_end - subject_start) << "\n";
+        response << "0\n";
+    }
+    else
+    {
+        int count = 0;
+        for (const auto &entry : fs::directory_iterator(userFolder))
+        {
+            if (entry.is_regular_file())
+            {
+                count++;
+                std::ifstream mailFile(entry.path());
+                std::string line;
+                while (std::getline(mailFile, line))
+                {
+                    if (line.rfind("Subject: ", 0) == 0)
+                    {
+                        response << line.substr(9) << "\n";
+                        break;
+                    }
+                }
+            }
+        }
+        response << count << "\n";
     }
 
     send(client_socket, response.str().c_str(), response.str().size(), 0);
@@ -134,31 +172,37 @@ void handle_list(int client_socket, const std::string &username)
 
 void handle_read(int client_socket, const std::string &username, int message_number)
 {
-    std::lock_guard<std::mutex> lock(mail_mutex);
-    const auto &messages = mail_spool[username];
+    fs::path userFolder = fs::path(mailFolder) / username;
+    fs::path messageFile = userFolder / (std::to_string(message_number) + ".txt");
 
-    if (message_number < 1 || message_number > static_cast<int>(messages.size()))
+    if (fs::exists(messageFile))
+    {
+        std::ifstream mailFile(messageFile);
+        std::ostringstream content;
+        content << "OK\n";
+        content << mailFile.rdbuf();
+        send(client_socket, content.str().c_str(), content.str().size(), 0);
+    }
+    else
     {
         send(client_socket, "ERR\n", 4, 0);
-        return;
     }
-
-    send(client_socket, ("OK\n" + messages[message_number - 1]).c_str(), messages[message_number - 1].size() + 3, 0);
 }
 
 void handle_del(int client_socket, const std::string &username, int message_number)
 {
-    std::lock_guard<std::mutex> lock(mail_mutex);
-    auto &messages = mail_spool[username];
+    fs::path userFolder = fs::path(mailFolder) / username;
+    fs::path messageFile = userFolder / (std::to_string(message_number) + ".txt");
 
-    if (message_number < 1 || message_number > static_cast<int>(messages.size()))
+    if (fs::exists(messageFile))
+    {
+        fs::remove(messageFile);
+        send(client_socket, "OK\n", 3, 0);
+    }
+    else
     {
         send(client_socket, "ERR\n", 4, 0);
-        return;
     }
-
-    messages.erase(messages.begin() + message_number - 1);
-    send(client_socket, "OK\n", 3, 0);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -261,8 +305,22 @@ void handle_client(int client_socket, const std::string &client_ip)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-int main()
+int main(int argc, char **argv)
 {
+    if (argc < 3)
+    {
+        std::cerr << "Usage: " << argv[0] << " <port> <mail_folder>" << std::endl;
+        return EXIT_FAILURE;
+    }
+
+    int port = std::stoi(argv[1]);
+    mailFolder = argv[2];
+
+    if (!fs::exists(mailFolder))
+    {
+        fs::create_directories(mailFolder);
+    }
+
     struct sockaddr_in server_addr, client_addr;
     socklen_t client_len = sizeof(client_addr);
 
@@ -275,7 +333,7 @@ int main()
 
     server_addr.sin_family = AF_INET;
     server_addr.sin_addr.s_addr = INADDR_ANY;
-    server_addr.sin_port = htons(PORT);
+    server_addr.sin_port = htons(port);
 
     if (bind(server_socket, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0)
     {
@@ -289,7 +347,7 @@ int main()
         return EXIT_FAILURE;
     }
 
-    std::cout << "Server running on port " << PORT << std::endl;
+    std::cout << "Server running on port " << port << std::endl;
 
     while (true)
     {
