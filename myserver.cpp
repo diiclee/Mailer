@@ -25,8 +25,8 @@ namespace fs = std::filesystem;
 std::mutex session_mutex;
 std::unordered_map<std::string, std::chrono::time_point<std::chrono::system_clock>> blacklist;
 std::unordered_map<int, std::string> active_sessions; // Maps socket to username
-std::mutex mail_mutex; // Mutex for mail operations
-std::string mailFolder; // Mail folder path
+std::mutex mail_mutex;                                // Mutex for mail operations
+std::string mailFolder;                               // Mail folder path
 
 ///////////////////////////////////////////////////////////////////////////////
 // LDAP Configuration
@@ -35,6 +35,8 @@ const int ldapVersion = LDAP_VERSION3;
 const char *ldapBase = "dc=technikum-wien,dc=at";
 
 ///////////////////////////////////////////////////////////////////////////////
+
+// Authenticate user with LDAP
 bool ldap_authenticate(const std::string &username, const std::string &password)
 {
     LDAP *ldapHandle;
@@ -47,13 +49,16 @@ bool ldap_authenticate(const std::string &username, const std::string &password)
 
     ldap_set_option(ldapHandle, LDAP_OPT_PROTOCOL_VERSION, &ldapVersion);
 
+    // Construct the LDAP bind user string
     char ldapBindUser[256];
     sprintf(ldapBindUser, "uid=%s,ou=people,%s", username.c_str(), ldapBase);
 
+    // set credentials
     BerValue credentials;
     credentials.bv_val = const_cast<char *>(password.c_str());
     credentials.bv_len = password.length();
 
+    // authenticate user
     BerValue *servercredp;
     rc = ldap_sasl_bind_s(ldapHandle, ldapBindUser, LDAP_SASL_SIMPLE, &credentials, nullptr, nullptr, &servercredp);
 
@@ -64,21 +69,26 @@ bool ldap_authenticate(const std::string &username, const std::string &password)
         return false;
     }
 
+    // clean up and return success
     ldap_unbind_ext_s(ldapHandle, nullptr, nullptr);
     return true;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+
 // Blacklist persistence file
 const std::string blacklistFile = "blacklist.txt";
 
 // Load the blacklist from file
-void load_blacklist() {
+void load_blacklist()
+{
     std::ifstream file(blacklistFile);
-    if (file.is_open()) {
+    if (file.is_open())
+    {
         std::string ip;
         long long expiry_time;
-        while (file >> ip >> expiry_time) {
+        while (file >> ip >> expiry_time)
+        {
             blacklist[ip] = std::chrono::system_clock::time_point(std::chrono::milliseconds(expiry_time));
         }
         file.close();
@@ -86,10 +96,13 @@ void load_blacklist() {
 }
 
 // Save the blacklist to file
-void save_blacklist() {
+void save_blacklist()
+{
     std::ofstream file(blacklistFile, std::ios::trunc);
-    if (file.is_open()) {
-        for (const auto& entry : blacklist) {
+    if (file.is_open())
+    {
+        for (const auto &entry : blacklist)
+        {
             auto expiry_time = std::chrono::duration_cast<std::chrono::milliseconds>(entry.second.time_since_epoch()).count();
             file << entry.first << " " << expiry_time << std::endl;
         }
@@ -98,14 +111,19 @@ void save_blacklist() {
 }
 
 // Check if an IP is blacklisted
-bool check_blacklist(const std::string &ip) {
+bool check_blacklist(const std::string &ip)
+{
     std::lock_guard<std::mutex> lock(session_mutex);
     auto now = std::chrono::system_clock::now();
-    if (blacklist.find(ip) != blacklist.end()) {
-        if (now < blacklist[ip]) {
+    if (blacklist.find(ip) != blacklist.end())
+    {
+        if (now < blacklist[ip])
+        {
             std::cerr << "IP " << ip << " is blacklisted.\n";
             return true; // IP is still blacklisted
-        } else {
+        }
+        else
+        {
             blacklist.erase(ip); // Remove expired entry
             save_blacklist();
         }
@@ -114,7 +132,8 @@ bool check_blacklist(const std::string &ip) {
 }
 
 // Add an IP to the blacklist
-void blacklist_ip(const std::string &ip) {
+void blacklist_ip(const std::string &ip)
+{
     std::lock_guard<std::mutex> lock(session_mutex);
     auto expiry_time = std::chrono::system_clock::now() + BLACKLIST_DURATION;
     blacklist[ip] = expiry_time;
@@ -123,6 +142,7 @@ void blacklist_ip(const std::string &ip) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+
 void handle_send(int client_socket, const std::string &username, const std::string &command)
 {
     std::istringstream stream(command);
@@ -236,7 +256,9 @@ void handle_del(int client_socket, const std::string &username, int message_numb
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-void handle_client(int client_socket, const std::string &client_ip) {
+
+void handle_client(int client_socket, const std::string &client_ip)
+{
     char buffer[BUF];
     int login_attempts = 0;
     bool authenticated = false;
@@ -244,10 +266,12 @@ void handle_client(int client_socket, const std::string &client_ip) {
 
     send(client_socket, "Welcome! Please LOGIN to proceed.\n", 36, 0);
 
-    while (true) {
+    while (true)
+    {
         memset(buffer, 0, BUF);
         int size = recv(client_socket, buffer, BUF - 1, 0);
-        if (size <= 0) {
+        if (size <= 0)
+        {
             close(client_socket);
             return;
         }
@@ -256,11 +280,14 @@ void handle_client(int client_socket, const std::string &client_ip) {
         command.erase(command.find_last_not_of(" \n\r") + 1);
 
         // If client is not authenticated, only accept LOGIN or QUIT commands
-        if (!authenticated) {
-            if (command.rfind("LOGIN", 0) == 0) {
+        if (!authenticated)
+        {
+            if (command.rfind("LOGIN", 0) == 0)
+            {
                 size_t first_space = command.find(' ');
                 size_t second_space = command.find(' ', first_space + 1);
-                if (first_space == std::string::npos || second_space == std::string::npos) {
+                if (first_space == std::string::npos || second_space == std::string::npos)
+                {
                     send(client_socket, "ERR Invalid LOGIN format.\n", 27, 0);
                     continue;
                 }
@@ -268,52 +295,74 @@ void handle_client(int client_socket, const std::string &client_ip) {
                 username = command.substr(first_space + 1, second_space - first_space - 1);
                 std::string password = command.substr(second_space + 1);
 
-                if (ldap_authenticate(username, password)) {
+                if (ldap_authenticate(username, password))
+                {
                     std::lock_guard<std::mutex> lock(session_mutex);
                     active_sessions[client_socket] = username;
                     authenticated = true;
                     send(client_socket, "OK\n", 3, 0);
-                } else {
+                }
+                else
+                {
                     login_attempts++;
-                    if (login_attempts >= MAX_LOGIN_ATTEMPTS) {
+                    if (login_attempts >= MAX_LOGIN_ATTEMPTS)
+                    {
                         blacklist_ip(client_ip);
                         send(client_socket, "ERR Blacklisted.\n", 17, 0);
                         close(client_socket);
                         return;
-                    } else {
+                    }
+                    else
+                    {
                         send(client_socket, "ERR Invalid credentials.\n", 26, 0);
                     }
                 }
-            } else if (command == "QUIT") {
+            }
+            else if (command == "QUIT")
+            {
                 close(client_socket);
                 return;
-            } else {
+            }
+            else
+            {
                 send(client_socket, "ERR Please LOGIN first.\n", 25, 0);
             }
             continue;
         }
 
         // Process commands for authenticated users
-        if (command.rfind("SEND", 0) == 0) {
+        if (command.rfind("SEND", 0) == 0)
+        {
             handle_send(client_socket, username, command.substr(5));
-        } else if (command == "LIST") {
+        }
+        else if (command == "LIST")
+        {
             handle_list(client_socket, username);
-        } else if (command.rfind("READ", 0) == 0) {
+        }
+        else if (command.rfind("READ", 0) == 0)
+        {
             int message_number = std::stoi(command.substr(5));
             handle_read(client_socket, username, message_number);
-        } else if (command.rfind("DEL", 0) == 0) {
+        }
+        else if (command.rfind("DEL", 0) == 0)
+        {
             int message_number = std::stoi(command.substr(4));
             handle_del(client_socket, username, message_number);
-        } else if (command == "QUIT") {
+        }
+        else if (command == "QUIT")
+        {
             close(client_socket);
             return;
-        } else {
+        }
+        else
+        {
             send(client_socket, "ERR Unknown command.\n", 22, 0);
         }
     }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+
 int main(int argc, char **argv)
 {
     if (argc < 3)
@@ -325,6 +374,7 @@ int main(int argc, char **argv)
     int port = std::stoi(argv[1]);
     mailFolder = argv[2];
 
+    // load blacklist from file
     load_blacklist();
 
     if (!fs::exists(mailFolder))
@@ -346,6 +396,7 @@ int main(int argc, char **argv)
     server_addr.sin_addr.s_addr = INADDR_ANY;
     server_addr.sin_port = htons(port);
 
+    // Bind the socket to the specified port
     if (bind(server_socket, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0)
     {
         perror("Bind failed");
@@ -360,6 +411,7 @@ int main(int argc, char **argv)
 
     std::cout << "Server running on port " << port << std::endl;
 
+    // accept and handle client connections in separate threads
     while (true)
     {
         int client_socket = accept(server_socket, (struct sockaddr *)&client_addr, &client_len);
@@ -380,6 +432,7 @@ int main(int argc, char **argv)
         std::thread(handle_client, client_socket, client_ip).detach();
     }
 
+    // save blacklist and clean up
     save_blacklist();
     close(server_socket);
     return EXIT_SUCCESS;
