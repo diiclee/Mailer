@@ -9,6 +9,7 @@
 ///////////////////////////////////////////////////////////////////////////////
 
 #define BUF 1024
+#define PORT 6543
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -200,7 +201,7 @@ int main(int argc, char **argv) {
 
     memset(&address, 0, sizeof(address));
     address.sin_family = AF_INET;
-    address.sin_port = htons(port);
+    address.sin_port = htons(PORT);
 
     if (argc < 2) {
         inet_aton("127.0.0.1", &address.sin_addr);
