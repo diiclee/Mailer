@@ -9,7 +9,6 @@
 ///////////////////////////////////////////////////////////////////////////////
 
 #define BUF 1024
-#define PORT 6543
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -194,6 +193,14 @@ int main(int argc, char **argv) {
     bool isQuit = false;
     bool isLoggedIn = false; // Track if the user has logged in
 
+    if (argc < 3) {
+        std::cerr << "Usage: " << argv[0] << " <server_ip> <port>" << std::endl;
+        return EXIT_FAILURE;
+    }
+
+    std::string server_ip = argv[1];
+    int port = std::stoi(argv[2]); // Port aus dem zweiten Argument
+
     if ((create_socket = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
         perror("Socket error");
         return EXIT_FAILURE;
@@ -201,7 +208,7 @@ int main(int argc, char **argv) {
 
     memset(&address, 0, sizeof(address));
     address.sin_family = AF_INET;
-    address.sin_port = htons(PORT);
+    address.sin_port = htons(port);
 
     if (argc < 2) {
         inet_aton("127.0.0.1", &address.sin_addr);
@@ -231,10 +238,12 @@ int main(int argc, char **argv) {
         if (std::cin.getline(buffer, BUF)) {
             std::string command(buffer);
 
-            if (!isLoggedIn && command != "LOGIN") {
+            if (command == "QUIT") {
+                isQuit = true;
+            } else if (!isLoggedIn && command != "LOGIN") {
                 std::cerr << "You must LOGIN first.\n";
                 continue;
-            }
+            } 
 
             if (command == "QUIT") {
                 isQuit = true;

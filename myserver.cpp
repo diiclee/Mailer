@@ -18,7 +18,6 @@ namespace fs = std::filesystem;
 
 ///////////////////////////////////////////////////////////////////////////////
 #define BUF 1024
-#define PORT 6543
 #define MAX_LOGIN_ATTEMPTS 3
 #define BLACKLIST_DURATION std::chrono::minutes(1)
 

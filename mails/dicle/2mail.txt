@@ -1,6 +1,0 @@
-Sender: ece
-Receiver: dicle
-Subject: kfdks
-
-fmdkfs
-
